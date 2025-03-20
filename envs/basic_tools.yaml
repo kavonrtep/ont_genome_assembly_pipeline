@@ -1,0 +1,10 @@
+name: basic_tools
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - r-optparse=1.7.5
+  - blast=2.16.0
+  - seqkit=2.10.0
+  - samtools=1.21

@@ -1,0 +1,15 @@
+# Input files
+oxford_nanopore_reads: "data/read_all_sample.fastq"      # path to your raw Oxford Nanopore fastq file
+plastid_db: "data/P.fulvum_MW160430.1_plast.fasta"                     # fasta file (or BLAST db) for plastid contamination
+mitochondrial_db: "data/Pisum_fulvum_NC_059792.1_min.fasta"         # fasta file (or BLAST db) for mitochondrial contamination
+tandem_repeats: "data/FabTR_all_sequences_231010.db.RM_format"           # library of tandem repeats (not used in current steps)
+painting_probes: "data/Cameor_v2_release_2_chromosomes_only.fasta_all.NGSfilter_CamIllumina.selected.CLEAN.fasta"         # library of painting probes oligos (not used in current steps)
+assembly_fai_ref: "data/JI1006__2024-12-10_ver2.1/JI1006_fulvum_v2.1.fasta.fai"
+blast_probes_ref: "data/JI1006_v2.1_x_oligos_CAMv2r2.blast_out"
+
+# Directories (you can change these as needed)
+quast_dir: "quast"       # directory where quast results will be written
+analysis_dir: "analysis" # directory for additional downstream analysis
+output_dir: "output"     # directory where all output files will be written
+
+

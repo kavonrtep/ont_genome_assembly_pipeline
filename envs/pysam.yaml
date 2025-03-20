@@ -1,0 +1,11 @@
+name: pysam
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - pysam=0.23.0
+  - blast=2.16.0
+  - biopython=1.78
+  - seqkit=2.10.0
+
