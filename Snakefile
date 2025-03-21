@@ -17,6 +17,9 @@ TIDECLUSTER_DIR = os.path.join(ANALYSIS_DIR, "tidecluster")
 min_limit = config.get("min_limit", 80000)
 max_limit = config.get("max_limit", 120000)
 mid_limit = max_limit - 1
+trim_start = config.get("trim_start", 0)
+trim_end = config.get("trim_end", 0)
+
 
 if config.get("assembly_fai_ref", False):
     make_doplots = 'true'
@@ -61,6 +64,7 @@ rule convert_fastq_to_fasta:
         fasta = os.path.join(DATA_DIR, "reads.fasta")
     conda:
         "envs/pysam.yaml"
+    threads: 1
     shell:
         """
         scripts_dir=$(realpath scripts)
@@ -83,6 +87,7 @@ rule fraction_reads:
         fastq_med    = os.path.join(DATA_DIR, "reads_midsized_fraction.fastq")
     conda:
         "envs/pysam.yaml"
+    threads: 4
     shell:
         """
         scripts_dir=$(realpath scripts)
@@ -105,6 +110,7 @@ rule detect_contamination_plastid:
         tsv = os.path.join(DATA_DIR, "contam_plastid.tsv")
     conda:
         "envs/pysam.yaml"
+    threads: workflow.cores
     shell:
         """
         scripts_dir=$(realpath scripts)
@@ -112,7 +118,7 @@ rule detect_contamination_plastid:
         # copy fasta file to the data directory
         cp {input.fasta} {DATA_DIR}/plastid.fasta
         makeblastdb -in {DATA_DIR}/plastid.fasta -dbtype nucl
-        detect_contamination.py -i {input.fasta} -o {output.tsv} --min_coverage 90 --min_identity 90 --num_cpu 4 -d {DATA_DIR}/plastid.fasta --word_size 61 --raw_blast {DATA_DIR}/plastid.blast
+        detect_contamination.py -i {input.fasta} -o {output.tsv} --min_coverage 90 --min_identity 90 --num_cpu {threads} -d {DATA_DIR}/plastid.fasta --word_size 21 --raw_blast {DATA_DIR}/plastid.blast
         """
 
 rule detect_contamination_mito:
@@ -122,6 +128,7 @@ rule detect_contamination_mito:
         tsv = os.path.join(DATA_DIR, "contam_mito.tsv")
     conda:
         "envs/pysam.yaml"
+    threads: workflow.cores
     shell:
         """
         scripts_dir=$(realpath scripts)
@@ -129,7 +136,7 @@ rule detect_contamination_mito:
         # copy fasta file to the data directory
         cp {input.fasta} {DATA_DIR}/mitochondrial.fasta
         makeblastdb -in {DATA_DIR}/mitochondrial.fasta -dbtype nucl
-        detect_contamination.py -i {input.fasta} -o {output.tsv} --min_coverage 90 --min_identity 90 --num_cpu 4 -d {DATA_DIR}/mitochondrial.fasta --word_size 61 --raw_blast {DATA_DIR}/mitochondrial.blast
+        detect_contamination.py -i {input.fasta} -o {output.tsv} --min_coverage 90 --min_identity 90 --num_cpu {threads} -d {DATA_DIR}/mitochondrial.fasta --word_size 21 --raw_blast {DATA_DIR}/mitochondrial.blast
         """
 
 ####################################################################
@@ -147,12 +154,15 @@ rule filter_fastq:
         fasta   = os.path.join(DATA_DIR, "reads.filtered.fasta")
     conda:
         "envs/pysam.yaml"
+    threads: 1
     shell:
         """
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
-        filter_fastq_fasta.py -i {input.fastq} -r {input.plastid} {input.mito} -o {output.fastq} --format fastq
-        filter_fastq_fasta.py -i {input.fasta} -r {input.plastid} {input.mito} -o {output.fasta} --format fasta
+        filter_fastq_fasta.py -i {input.fastq} -r {input.plastid} {input.mito} -o {output.fastq} \
+        --format fastq --trim_start {trim_start} --trim_end {trim_end} 
+        filter_fastq_fasta.py -i {input.fasta} -r {input.plastid} {input.mito} -o {output.fasta} \
+         --format fasta --trim_start {trim_start} --trim_end {trim_end}
         """
 
 ####################################################################
@@ -181,6 +191,7 @@ rule gfa_to_fasta:
         gfa = os.path.join(OUTPUT_DIR, "hifiasm_assembly.bp.p_ctg.gfa")
     output:
         fasta = os.path.join(OUTPUT_DIR, "hifiasm_assembly.bp.p_ctg.gfa.fasta")
+    threads: 1
     shell:
         """
         scripts_dir=$(realpath scripts)
@@ -202,6 +213,7 @@ rule run_quast:
         quast_dir = QUAST_DIR
     conda:
         "envs/quast.yaml"
+    threads: 1
     shell:
         """
         scripts_dir=$(realpath scripts)
@@ -218,6 +230,7 @@ rule make_index_and_blast_database:
         db = os.path.join(OUTPUT_DIR, "hifiasm_assembly.bp.p_ctg.gfa.fasta.nhr")
     conda:
         "envs/basic_tools.yaml"
+    threads: 1
     shell:
         """
         scripts_dir=$(realpath scripts)
@@ -235,8 +248,8 @@ rule map_probes:
     output:
         blast_probes_query=os.path.join(PAINTING_DIR,"hifiasm_assembly.bp.p_ctg_x_oligos_CAMv2r2.blast_out"),
     params:
-        blast_threads=24,
         dotplot=os.path.join(PAINTING_DIR,"hifiasm_assembly.bp.p_ctg_x_oligos_CAMv2r2_vs_ref.png")
+    threads: workflow.cores
 
     conda:
         "envs/basic_tools.yaml"
@@ -247,7 +260,7 @@ rule map_probes:
     
         # Run blastn: map the painting probes against the assembly
         blastn -task blastn -db {input.assembly_query} -query {input.probes} -evalue 1e-10 \
-          -num_alignments 1 -outfmt 6 -num_threads {params.blast_threads} -out {output.blast_probes_query}
+          -num_alignments 1 -outfmt 6 -num_threads {threads} -out {output.blast_probes_query}
         touch {output.blast_probes_query}
         
         # run next step only if make_doplots is true
@@ -294,7 +307,7 @@ rule detect_clipping:
         "envs/pysam.yaml"
     params:
          prefix = os.path.join(CLIPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction")
-    threads: workflow.cores
+    threads: 1
     shell:
         """
         scripts_dir=$(realpath scripts)
@@ -307,7 +320,7 @@ rule extract_contig_ends:
     input:
         assembly=os.path.join(OUTPUT_DIR,"hifiasm_assembly.bp.p_ctg.gfa.fasta"),
         bam=os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted.bam"),
-        reads=os.path.join(DATA_DIR,"reads.longest_fraction.fasta")
+        reads=os.path.join(DATA_DIR,"reads_longest_fraction.fasta")
     output:
         contig_pairs=os.path.join(CONTIG_PAIRS_DIR, "contig_pairs.csv")
     conda:
