@@ -12,6 +12,8 @@ ONT_MAPPING_DIR  = os.path.join(ANALYSIS_DIR, "mapping_ONT_reads")
 CLIPPING_DIR  = os.path.join(ANALYSIS_DIR, "clipping_info")
 CONTIG_PAIRS_DIR = os.path.join(ANALYSIS_DIR, "contig_pairs")
 TIDECLUSTER_DIR = os.path.join(ANALYSIS_DIR, "tidecluster")
+MITO_DB = config["mitochondrial_db"]
+PLASTID_DB = config["plastid_db"]
 
 # get limits for size fractions, if not provided, use defaults 80k and 120k
 min_limit = config.get("min_limit", 80000)
@@ -47,10 +49,11 @@ rule all:
         os.path.join(QUAST_DIR, "quast_done.txt"),
         os.path.join(PAINTING_DIR, "hifiasm_assembly.bp.p_ctg_x_oligos_CAMv2r2.blast_out"),
         os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted.bam"),
-        os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_Q12_midsized_fraction.sorted.bam"),
+        os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted.bam"),
         os.path.join(CLIPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_clip_info.tsv"),
         os.path.join(CONTIG_PAIRS_DIR, "contig_pairs.csv"),
-        os.path.join(TIDECLUSTER_DIR, "tc_done.txt")
+        os.path.join(TIDECLUSTER_DIR, "tc_done.txt"),
+        os.path.join(CLIPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_zero_coverage.bed")
 
 
 ####################################################################
@@ -93,7 +96,7 @@ rule fraction_reads:
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
         seqkit seq -m {max_limit} {input.fasta} > {output.fasta_long} &
-        seqkit seq -m {min_limit} {input.fastq} > {output.fastq_long} &
+        seqkit seq -m {max_limit} {input.fastq} > {output.fastq_long} &
         seqkit seq -m {min_limit} -M {mid_limit} {input.fasta} > {output.fasta_med} &
         seqkit seq -m {min_limit} -M {mid_limit} {input.fastq} > {output.fastq_med}
         wait
@@ -116,7 +119,7 @@ rule detect_contamination_plastid:
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
         # copy fasta file to the data directory
-        cp {input.fasta} {DATA_DIR}/plastid.fasta
+        cp {PLASTID_DB} {DATA_DIR}/plastid.fasta
         makeblastdb -in {DATA_DIR}/plastid.fasta -dbtype nucl
         detect_contamination.py -i {input.fasta} -o {output.tsv} --min_coverage 90 --min_identity 90 --num_cpu {threads} -d {DATA_DIR}/plastid.fasta --word_size 21 --raw_blast {DATA_DIR}/plastid.blast
         """
@@ -134,7 +137,7 @@ rule detect_contamination_mito:
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
         # copy fasta file to the data directory
-        cp {input.fasta} {DATA_DIR}/mitochondrial.fasta
+        cp {MITO_DB} {DATA_DIR}/mitochondrial.fasta
         makeblastdb -in {DATA_DIR}/mitochondrial.fasta -dbtype nucl
         detect_contamination.py -i {input.fasta} -o {output.tsv} --min_coverage 90 --min_identity 90 --num_cpu {threads} -d {DATA_DIR}/mitochondrial.fasta --word_size 21 --raw_blast {DATA_DIR}/mitochondrial.blast
         """
@@ -265,7 +268,7 @@ rule map_probes:
         
         # run next step only if make_doplots is true
         if [ "{make_doplots}" = "true" ]; then
-            make_dotplot_from_probes.R -q {output.blast_probes_query} -Q {input.assembly_fai} \
+            make_dotplot_from_probes2.R -q {output.blast_probes_query} -Q {input.assembly_fai} \
               -S {FAI_REF} -s {BLAST_REF} -o {params.dotplot}
         fi
         """
@@ -278,19 +281,21 @@ rule map_nanopore_reads_to_assembly:
         filtq_med=os.path.join(DATA_DIR,"reads_midsized_fraction.fastq")
     output:
         bam_long=os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted.bam"),
-        bam_med=os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_Q12_midsized_fraction.sorted.bam")
+        bam_med=os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted.bam")
     conda:
         "envs/basic_tools.yaml"
     threads: workflow.cores
+    log: os.path.join(OUTPUT_DIR, "logs/map_nanopore_reads_to_assembly.log")
     shell:
         """
         # dorado is in path
-        dorado aligner {input.assembly} {input.fastq_long}  > {output.bam_long}.unsorted.bam
+        echo "lgging test"
+        dorado aligner {input.assembly} {input.fastq_long}  2> {log} 1> {output.bam_long}.unsorted.bam
         samtools sort -@ {threads} -o {output.bam_long} {output.bam_long}.unsorted.bam
         samtools index -c {output.bam_long}
         rm {output.bam_long}.unsorted.bam
         
-        dorado aligner {input.assembly} {input.filtq_med}  > {output.bam_med}.unsorted.bam
+        dorado aligner {input.assembly} {input.filtq_med}  2> {log} 1> {output.bam_med}.unsorted.bam
         samtools sort -@ {threads} -o {output.bam_med} {output.bam_med}.unsorted.bam
         samtools index -c {output.bam_med}
         rm {output.bam_med}.unsorted.bam
@@ -308,11 +313,34 @@ rule detect_clipping:
     params:
          prefix = os.path.join(CLIPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction")
     threads: 1
+    log: os.path.join(OUTPUT_DIR, "logs/detect_clipping.log")
     shell:
         """
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
-        detect_clipping.py --bam {input.bam_long} --out {output.clipping_long} --min_clip 10000 --add_coverage --out {params.prefix} 
+        detect_clipping.py --bam {input.bam_long} --min_clip 10000 --add_coverage --out {params.prefix} > {log} 2>&1
+        """
+
+
+rule get_zero_coverage:
+    input:
+        bam_long=os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted.bam"),
+        bam_mid=os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted.bam")
+
+    output:
+        zero_coverage_bed_long=os.path.join(CLIPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_zero_coverage.bed"),
+        zero_coverage_bed_mid=os.path.join(CLIPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction_zero_coverage.bed")
+    conda:
+        "envs/pysam.yaml"
+    threads: 2
+    log: "logs/get_zero_coverage.log"
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        zero_coverage.py --bam {input.bam_long} --out {output.zero_coverage_bed_long} &
+        zero_coverage.py --bam {input.bam_mid} --out {output.zero_coverage_bed_mid} &
+        wait
         """
 
 
@@ -328,7 +356,7 @@ rule extract_contig_ends:
     params:
         output_dir = CONTIG_PAIRS_DIR
     threads: workflow.cores
-
+    log: "logs/extract_contig_ends.log"
 
     shell:
         """

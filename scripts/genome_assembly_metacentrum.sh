@@ -7,7 +7,7 @@
 #PBS -m bae
 
 ## CONFIGURATION - use absolute paths for input files and Singularity image
-SINGULARITY_IMAGE="/auto/brno2/home/kavonrtep/IPIP200579_ULK250311/genome_assembly_pipeline_v1.sif"
+SINGULARITY_IMAGE="/auto/brno2/home/kavonrtep/IPIP200579_ULK250311/genome_assembly_pipeline_v2.sif"
 
 # Input files (absolute paths)
 OXFORD_READS="/auto/brno2/home/kavonrtep/IPIP200579_ULK250311/IPIP200579_ULK250311_dorado_0.9.1_dupl_sup_5mC_filt_Q12_m30k.fastq"
@@ -21,7 +21,7 @@ ASSEMBLY_FAI_REF="/auto/brno2/home/kavonrtep/IPIP200579_ULK250311/cameor_v2.fast
 BLAST_PROBES_REF="/auto/brno2/home/kavonrtep/IPIP200579_ULK250311/CAMv2r3_x_oligos_CAMv2r2.blast_out"  # leave empty if not used
 
 # Directories (output will be created inside SCRATCHDIR and then copied back)
-OUTPUT_DIR="/auto/brno2/home/kavonrtep/IPIP200579_ULK250311/hifiasm"    # permanent storage location
+OUTPUT_DIR="/auto/brno2/home/kavonrtep/IPIP200579_ULK250311/hifiasm2"    # permanent storage location
 QUAST_DIR="quast"         # relative directory name for Quast results
 ANALYSIS_DIR="analysis"   # relative directory name for additional analysis
 
@@ -90,12 +90,9 @@ singularity run -B "$SCRATCHDIR" --env TMPDIR="$tmpdir" "$SINGULARITY_IMAGE_BASE
 
 # Copy results from SCRATCHDIR back to permanent storage
 mkdir -p "$OUTPUT_DIR"
-rsync -avt "$SCRATCHDIR/output" "$OUTPUT_DIR/"
+rsync -avt --no-group "$SCRATCHDIR/output" "$OUTPUT_DIR/"
 
 # Optionally, copy the config and log files for record keeping
-rsync -avt "$SCRATCHDIR/config.yaml" "$OUTPUT_DIR/"
-rsync -avt "$SCRATCHDIR/.snakemake" "$OUTPUT_DIR/"
+rsync -avt --no-group "$SCRATCHDIR/config.yaml" "$OUTPUT_DIR/"
+rsync -avt --no-group "$SCRATCHDIR/.snakemake" "$OUTPUT_DIR/"
 
-# Archive the output directory
-zip -y -fz -r "$SCRATCHDIR/output.zip" output
-rsync -avt "$SCRATCHDIR/output.zip" "$OUTPUT_DIR/"

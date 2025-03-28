@@ -13,7 +13,7 @@ blast_probes_ref: "/mnt/ceph/454_data/Pisum_pangenome/assemblies/JI1006__2024-12
 # Directories (you can change these as needed)
 quast_dir: "quast"       # directory where quast results will be written
 analysis_dir: "analysis" # directory for additional downstream analysis
-output_dir: "/home/petr/PycharmProjects/ont_genome_assembly_pipeline/tmp/output4"     # directory where all output files will be written
+output_dir: "/home/petr/PycharmProjects/ont_genome_assembly_pipeline/tmp/output8"     # directory where all output files will be written
 
 
 # size fractioning limits

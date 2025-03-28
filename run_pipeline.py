@@ -102,7 +102,8 @@ def main():
     # Construct the Snakemake command.
     cmd = (f"snakemake --snakefile {snakefile} --configfile {args.config} "
            f"--cores {args.threads} --use-conda --conda-prefix {conda_envs_path} "
-           f"--conda-frontend mamba --show-failed-logs {args.snakemake_args}")
+           f"--conda-frontend mamba --show-failed-logs {args.snakemake_args}"
+           " --keep-going --verbose")
 
     # Update environment with cache directory.
     env = os.environ.copy()

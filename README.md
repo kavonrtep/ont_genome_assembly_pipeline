@@ -91,7 +91,7 @@ To build the container locally, execute the following command (adjust the image 
 
 ```bash
 SINGULARITY=$(which singularity)
-sudo ionice -c3 $SINGULARITY build images/genome_assembly_pipeline_v1.sif Singularity
+sudo ionice -c3 $SINGULARITY build images/genome_assembly_pipeline_v2.sif Singularity
 ```
 
 

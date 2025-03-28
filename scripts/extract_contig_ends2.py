@@ -67,6 +67,8 @@ def extract_contig_region(genome_fasta, contig, which_end, window_size, out_file
         end = contig_len
     region = f"{contig}:{start}-{end}"
     cmd = ["seqkit", "faidx", genome_fasta, region]
+    # extract the region to a file
+    print(cmd)
     with open(out_file, "w") as fh:
         subprocess.check_call(cmd, stdout=fh)
     # Read the extracted sequence (concatenate all non-header lines)
@@ -180,6 +182,9 @@ def extract_reads_for_region(
         for aln in bamfile.fetch(chrom, start - 1, end):
             # Use query_alignment_length to filter reads.
             if aln.query_alignment_length is None or aln.query_alignment_length < min_aln_length:
+                continue
+            # skip MAPQ == 0 reads
+            if aln.mapping_quality == 0:
                 continue
             if not aln.is_reverse:
                 fwd_ids.add(aln.query_name)
@@ -351,11 +356,12 @@ def main():
     contig1_seq, contig1_region = extract_contig_region(
         args.genome_fasta, args.contig1, contig1_region_type, args.window_size, contig1_out
     )
+    print(f"Extracted {contig1_region} to {contig1_out}")
     contig2_out = os.path.join(args.out_dir, f"{args.contig2}_{contig2_region_type}.fasta")
     contig2_seq, contig2_region = extract_contig_region(
         args.genome_fasta, args.contig2, contig2_region_type, args.window_size, contig2_out
     )
-
+    print(f"Extracted {contig2_region} to {contig2_out}")
     # For final combined FASTA, adjust sequences so that:
     #   - contig1 part is in 3' orientation.
     #   - contig2 part is in 5' orientation.

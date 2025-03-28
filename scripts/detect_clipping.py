@@ -33,6 +33,12 @@ def get_clip_events(bam_path, min_clip):
         for read in bam.fetch(until_eof=True):
             if read.is_unmapped or read.cigartuples is None:
                 continue
+            # do not use alignment with low mapping quality (MAPQ == 0)
+            if read.mapping_quality == 0:
+                continue
+            # alignment length must be at least min_clip
+            if read.query_alignment_length < min_clip:
+                continue
             # Check left-end soft clipping (first CIGAR operation; op code 4)
             op, length = read.cigartuples[0]
             if op == 4 and length >= min_clip:
@@ -294,7 +300,8 @@ def main():
     parser.add_argument("--bam", required=True, help="Input BAM file (filtered and indexed)")
     parser.add_argument("--out", required=True, help="Output file prefix")
     parser.add_argument("--min_clip", type=int, default=10000,
-                        help="Minimum soft clipping length to report (default: 10000 bp)")
+                        help="Minimum soft clipping length to report (default: 10000 "
+                             "bp). Minimal alignment length must be at least this value.")
     parser.add_argument("--add_coverage", action="store_true", default=False,
                         help="Compute coverage at each clipping position")
     parser.add_argument("--merge_tolerance", type=int, default=10,
