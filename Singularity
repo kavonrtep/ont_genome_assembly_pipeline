@@ -3,7 +3,7 @@ From: continuumio/miniconda3
 
 %post
     apt-get update
-    apt-get install -y libxml2 libxml2-dev
+    apt-get install -y libxml2 libxml2-dev file coinor-cbc
     # install build tools, zlib, and git
     apt-get install -y build-essential zlib1g-dev git
     apt-get install -y default-jre
@@ -14,7 +14,7 @@ From: continuumio/miniconda3
     conda install -c conda-forge mamba
 
     # Install Snakemake
-    mamba install -c bioconda -c conda-forge snakemake=8.30.0
+    mamba install -c bioconda -c conda-forge snakemake=8.12.0
     # configure strict channel priority
     conda config --set channel_priority strict
     conda init bash

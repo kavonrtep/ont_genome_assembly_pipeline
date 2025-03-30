@@ -62,18 +62,51 @@ rule all:
 
 rule convert_fastq_to_fasta:
     input:
-        fastq = config["oxford_nanopore_reads"]
+        fastq=config["oxford_nanopore_reads"]
     output:
-        fasta = os.path.join(DATA_DIR, "reads.fasta")
+        fasta=os.path.join(DATA_DIR,"reads.fasta")
     conda:
         "envs/pysam.yaml"
     threads: 1
+    log:
+        "logs/convert_fastq_to_fasta.log"
     shell:
         """
-        scripts_dir=$(realpath scripts)
-        export PATH=$scripts_dir:$PATH
-        seqkit fq2fa {input.fastq} > {output.fasta}
+        set -x
+        echo "----- Starting convert_fastq_to_fasta rule -----" | tee -a {log}
+        echo "Working directory: $(pwd)" | tee -a {log}
+        echo "Listing current directory contents:" | tee -a {log}
+        ls -l | tee -a {log}
+        echo "Using conda python: $(which python)" | tee -a {log}
+        echo "Current PATH: $PATH" | tee -a {log}
+        echo "Input FASTQ: {input.fastq}" | tee -a {log}
+        echo "Expected Output FASTA: {output.fasta}" | tee -a {log}
+
+        # List the directory where the output should be
+        echo "----- Listing directory before conversion -----" | tee -a {log}
+        ls -l $(dirname {output.fasta}) | tee -a {log}
+
+        # Run conversion and log all output
+        echo "----- Running seqkit fq2fa -----" | tee -a {log}
+        seqkit fq2fa {input.fastq} > {output.fasta} 2>&1 | tee -a {log}
+
+        # Pause briefly to allow for filesystem update
+        sleep 2
+
+        echo "----- Listing directory after conversion -----" | tee -a {log}
+        ls -l $(dirname {output.fasta}) | tee -a {log}
+
+        # Check if output file exists, then log details
+        if [ -f {output.fasta} ]; then
+            echo "Output file {output.fasta} exists." | tee -a {log}
+            file {output.fasta} | tee -a {log}
+            stat {output.fasta} | tee -a {log}
+        else
+            echo "Error: Output file {output.fasta} not found." | tee -a {log}
+            exit 1
+        fi
         """
+
 
 ####################################################################
 # 1a. Create different read length fractions (not used for assembly)
