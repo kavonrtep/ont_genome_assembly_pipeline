@@ -80,6 +80,7 @@ blast_df$send_relative <- blast_df$send + chromosome_sizes_subject$cumulative_st
 
 # --- NEW: Reorder query contigs based on median subject coordinate ---
 # Compute a midpoint for each BLAST hit in subject coordinates
+
 blast_df$subject_mid <- (blast_df$sstart_relative + blast_df$send_relative) / 2
 # Calculate the median subject coordinate for each query contig
 median_subject <- aggregate(subject_mid ~ qseqid, data = blast_df, FUN = median)
@@ -154,12 +155,21 @@ segments(blast_df$qstart_relative, blast_df$sstart_relative,
 
 dev.off()
 
+
+
+
 # --- Export data in PAF format ---
 blast_df$qlen <- chromosome_sizes_query$qlen[match(blast_df$qseqid, chromosome_sizes_query$qseqid)]
 blast_df$slen <- chromosome_sizes_subject$slen[match(blast_df$sseqid, chromosome_sizes_subject$sseqid)]
 blast_df$length <- abs(blast_df$qend - blast_df$qstart)
 blast_df$strand <- ifelse(blast_df$sstrand == "plus", "+", "-")
 blast_df$mapq <- 255
+
+blast_df$cumulative_qlen <- chromosome_sizes_query$cumulative_qlen[match(blast_df$qseqid, chromosome_sizes_query$qseqid)]
+blast_df$cumulative_slen <- chromosome_sizes_subject$cumulative_slen[match(blast_df$sseqid, chromosome_sizes_subject$sseqid)]
+blast_df$cumulative_start_qlen <- chromosome_sizes_query$cumulative_start[match(blast_df$qseqid, chromosome_sizes_query$qseqid)]
+blast_df$cumulative_strat_slen <- chromosome_sizes_subject$cumulative_start[match(blast_df$sseqid, chromosome_sizes_subject$sseqid)]
+
 
 if (is.null(opt$output_paf)) {
   opt$output_paf <- paste0(opt$output, ".paf")
@@ -170,3 +180,49 @@ PAF <- blast_df[, c("qseqid", "qlen", "qstart", "qend", "strand",
 colnames(PAF) <- c("qseqid", "qlen", "qstart", "qend", "strand",
                    "sseqid", "slen", "sstart", "send", "length", "m", "mapq")
 write.table(PAF, file = opt$output_paf, sep = "\t", quote = FALSE, row.names = FALSE, col.names = FALSE)
+
+tbl <- table(blast_df$qseqid, color_scheme)
+
+# prevalent orientation
+rc_orientation_id <- rownames(tbl)[tbl[,2]>tbl[,1]]
+
+
+blast_df$qstart_relative_new <- blast_df$cumulative_qlen - blast_df$qstart_relative + blast_df$cumulative_start_qlen
+blast_df$qend_relative_new   <- blast_df$cumulative_qlen - blast_df$qend_relative + blast_df$cumulative_start_qlen
+
+
+# export second image
+second_output <- paste0(tools::file_path_sans_ext(opt$output), "_reversed.png")
+
+png(second_output, width = width, height = height, res = 600, units = "in")
+par(mai = rep(M, 4))
+plot(1, 1, xlim = c(1, xmax), ylim = c(1, ymax),
+     xlab = query_label, ylab = subject_label, type = "n", axes = FALSE)
+
+# Draw boundaries for each chromosome (query and subject)
+par(lwd = 1)
+abline(v = c(1, chromosome_sizes_query$cumulative_qlen), lty = 2, col = "grey")
+abline(h = c(1, chromosome_sizes_subject$cumulative_slen), lty = 2, col = "grey")
+
+# Add chromosome labels
+axis(side = 1, at = chromosome_sizes_query$cumulative_qlen - chromosome_sizes_query$qlen / 2,
+     labels = chromosome_sizes_query$qseqid, tick = FALSE, cex.axis = 0.5, las = 2)
+axis(side = 2, at = chromosome_sizes_subject$cumulative_slen - chromosome_sizes_subject$slen / 2,
+     labels = chromosome_sizes_subject$sseqid, tick = FALSE, cex.axis = 0.5, las = 2)
+
+# Define color scheme for hits based on strand (blue for plus, red for minus)
+color_scheme <- ifelse(blast_df$sstrand == "plus", "blue", "red")
+
+# Draw segments for each BLAST hit (using relative coordinates)
+x0 <- ifelse(blast_df$qseqid %in% rc_orientation_id, blast_df$qstart_relative_new, blast_df$qstart_relative)
+x1 <- ifelse(blast_df$qseqid %in% rc_orientation_id, blast_df$qend_relative_new, blast_df$qend_relative)
+y0 <- blast_df$sstart_relative
+y1 <- blast_df$send_relative
+
+segments(x0, y0, x1, y1,
+         col = color_scheme)
+
+dev.off()
+
+
+

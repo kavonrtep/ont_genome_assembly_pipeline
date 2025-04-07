@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<Session genome="../../hifiasm_assembly.bp.p_ctg.gfa.fasta" locus="All" version="8">
+    <Resources>
+        <Resource path="../../analysis/tidecluster/tc_tidehunter.gff3" type="gff3"/>
+        <Resource path="../../analysis/clipping_info/hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction_zero_coverage.bed" type="bed"/>
+        <Resource path="../../analysis/clipping_info/hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_right_span.bed" type="bed"/>
+        <Resource path="../../analysis/mapping_ONT_reads/hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted.bam" type="bam"/>
+        <Resource path="../../analysis/clipping_info/hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_zero_coverage.bed" type="bed"/>
+        <Resource path="../../analysis/clipping_info/hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_left_span.bed" type="bed"/>
+        <Resource path="../../analysis/tidecluster/tc_annotation.gff3" type="gff3"/>
+        <Resource path="../../analysis/mapping_ONT_reads/hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted.bam" type="bam"/>
+    </Resources>
+    <Panel height="238" name="Panel1743683030263" width="2541">
+        <Track attributeKey="hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted.bam Coverage" autoScale="true" clazz="org.broad.igv.sam.CoverageTrack" fontSize="10" id="../../analysis/mapping_ONT_reads/hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted.bam_coverage" name="hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted.bam Coverage" snpThreshold="0.2" visible="true">
+            <DataRange baseline="0.0" drawBaseline="true" flipAxis="false" maximum="60.0" minimum="0.0" type="LINEAR"/>
+        </Track>
+        <Track attributeKey="hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted.bam Junctions" autoScale="false" clazz="org.broad.igv.sam.SpliceJunctionTrack" fontSize="10" groupByStrand="false" height="60" id="../../analysis/mapping_ONT_reads/hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted.bam_junctions" maxdepth="50" name="hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted.bam Junctions" visible="false"/>
+        <Track attributeKey="hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted.bam" clazz="org.broad.igv.sam.AlignmentTrack" color="185,185,185" displayMode="EXPANDED" experimentType="THIRD_GEN" fontSize="10" id="../../analysis/mapping_ONT_reads/hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted.bam" name="hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted.bam" visible="true">
+            <RenderOptions/>
+        </Track>
+    </Panel>
+    <Panel height="244" name="Panel1743683030414" width="2541">
+        <Track attributeKey="hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted.bam Coverage" autoScale="true" clazz="org.broad.igv.sam.CoverageTrack" fontSize="10" id="../../analysis/mapping_ONT_reads/hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted.bam_coverage" name="hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted.bam Coverage" snpThreshold="0.2" visible="true">
+            <DataRange baseline="0.0" drawBaseline="true" flipAxis="false" maximum="60.0" minimum="0.0" type="LINEAR"/>
+        </Track>
+        <Track attributeKey="hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted.bam Junctions" autoScale="false" clazz="org.broad.igv.sam.SpliceJunctionTrack" fontSize="10" groupByStrand="false" height="60" id="../../analysis/mapping_ONT_reads/hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted.bam_junctions" maxdepth="50" name="hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted.bam Junctions" visible="false"/>
+        <Track attributeKey="hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted.bam" clazz="org.broad.igv.sam.AlignmentTrack" color="185,185,185" displayMode="EXPANDED" experimentType="THIRD_GEN" fontSize="10" id="../../analysis/mapping_ONT_reads/hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted.bam" name="hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted.bam" visible="true">
+            <RenderOptions/>
+        </Track>
+    </Panel>
+    <Panel height="660" name="FeaturePanel" width="2541">
+        <Track attributeKey="Reference sequence" clazz="org.broad.igv.track.SequenceTrack" fontSize="10" id="Reference sequence" name="Reference sequence" sequenceTranslationStrandValue="+" shouldShowTranslation="false" visible="true"/>
+        <Track attributeKey="hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_left_span.bed" clazz="org.broad.igv.track.FeatureTrack" colorScale="ContinuousColorScale;0.0;8.0;255,255,255;0,0,178" fontSize="10" groupByStrand="false" id="../../analysis/clipping_info/hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_left_span.bed" name="hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_left_span.bed" visible="true"/>
+        <Track attributeKey="hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_right_span.bed" clazz="org.broad.igv.track.FeatureTrack" colorScale="ContinuousColorScale;0.0;9.0;255,255,255;0,0,178" fontSize="10" groupByStrand="false" id="../../analysis/clipping_info/hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_right_span.bed" name="hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_right_span.bed" visible="true"/>
+        <Track attributeKey="hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_zero_coverage.bed" clazz="org.broad.igv.track.FeatureTrack" colorScale="ContinuousColorScale;0.0;11.0;255,255,255;0,0,178" fontSize="10" groupByStrand="false" id="../../analysis/clipping_info/hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_zero_coverage.bed" name="hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_zero_coverage.bed" visible="true"/>
+        <Track attributeKey="hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction_zero_coverage.bed" clazz="org.broad.igv.track.FeatureTrack" colorScale="ContinuousColorScale;0.0;8.0;255,255,255;0,0,178" fontSize="10" groupByStrand="false" id="../../analysis/clipping_info/hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction_zero_coverage.bed" name="hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction_zero_coverage.bed" visible="true"/>
+        <Track attributeKey="tc_annotation.gff3" clazz="org.broad.igv.track.FeatureTrack" color="0,153,51" colorScale="ContinuousColorScale;0.0;66.0;255,255,255;0,0,178" fontSize="10" groupByStrand="false" id="../../analysis/tidecluster/tc_annotation.gff3" name="tc_annotation.gff3" visible="true"/>
+        <Track attributeKey="tc_tidehunter.gff3" clazz="org.broad.igv.track.FeatureTrack" color="0,0,0" colorScale="ContinuousColorScale;0.0;1029.0;255,255,255;0,0,178" fontSize="10" groupByStrand="false" id="../../analysis/tidecluster/tc_tidehunter.gff3" name="tc_tidehunter.gff3" visible="true"/>
+    </Panel>
+    <PanelLayout dividerFractions="0.005159071367153913,0.21410146173688735,0.4282029234737747"/>
+    <HiddenAttributes>
+        <Attribute name="DATA FILE"/>
+        <Attribute name="DATA TYPE"/>
+        <Attribute name="NAME"/>
+    </HiddenAttributes>
+</Session>

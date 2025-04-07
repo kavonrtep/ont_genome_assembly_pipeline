@@ -1,5 +1,5 @@
 Bootstrap: docker
-From: continuumio/miniconda3
+From: continuumio/miniconda3@sha256:3a2017213a16daff5bc8dec8571354249c3370d6b0d64ac78e8538257ce42d4c
 
 %post
     apt-get update
@@ -14,7 +14,12 @@ From: continuumio/miniconda3
     conda install -c conda-forge mamba
 
     # Install Snakemake
-    mamba install -c bioconda -c conda-forge snakemake=8.12.0
+    mamba install -c bioconda -c conda-forge snakemake coin-or-cbc=2.10.10
+
+    # test if cbc is correctly installed, if not exit with error
+    cbc ? || exit 1
+
+
     # configure strict channel priority
     conda config --set channel_priority strict
     conda init bash

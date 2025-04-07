@@ -12,6 +12,8 @@ ONT_MAPPING_DIR  = os.path.join(ANALYSIS_DIR, "mapping_ONT_reads")
 CLIPPING_DIR  = os.path.join(ANALYSIS_DIR, "clipping_info")
 CONTIG_PAIRS_DIR = os.path.join(ANALYSIS_DIR, "contig_pairs")
 TIDECLUSTER_DIR = os.path.join(ANALYSIS_DIR, "tidecluster")
+GENOME_DOTPLOT_DIR = os.path.join(ANALYSIS_DIR, "genome_dotplots")
+IGV = os.path.join(ANALYSIS_DIR, "igv")
 MITO_DB = config["mitochondrial_db"]
 PLASTID_DB = config["plastid_db"]
 
@@ -39,7 +41,8 @@ def create_dirs(*dirs):
             os.makedirs(d)
 
 create_dirs(OUTPUT_DIR, QUAST_DIR, ANALYSIS_DIR, DATA_DIR,
-            PAINTING_DIR, ONT_MAPPING_DIR, CLIPPING_DIR, CONTIG_PAIRS_DIR, TIDECLUSTER_DIR)
+            PAINTING_DIR, ONT_MAPPING_DIR, CLIPPING_DIR, CONTIG_PAIRS_DIR,
+            TIDECLUSTER_DIR, GENOME_DOTPLOT_DIR, IGV)
 print("Output directory structure created:", os.listdir(OUTPUT_DIR))
 
 # Final targets: final assembly fasta and a Quast marker file
@@ -53,7 +56,10 @@ rule all:
         os.path.join(CLIPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_clip_info.tsv"),
         os.path.join(CONTIG_PAIRS_DIR, "contig_pairs.csv"),
         os.path.join(TIDECLUSTER_DIR, "tc_done.txt"),
-        os.path.join(CLIPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_zero_coverage.bed")
+        os.path.join(CLIPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_zero_coverage.bed"),
+        os.path.join(CLIPPING_DIR, "dotplots_done.txt"),
+        os.path.join(IGV, "igv.xml")
+
 
 
 ####################################################################
@@ -313,8 +319,8 @@ rule map_nanopore_reads_to_assembly:
         fastq_long=os.path.join(DATA_DIR,"reads_longest_fraction.fastq"),
         filtq_med=os.path.join(DATA_DIR,"reads_midsized_fraction.fastq")
     output:
-        bam_long=os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted.bam"),
-        bam_med=os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted.bam")
+        bam_long=os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted_full.bam"),
+        bam_med=os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted_full.bam")
     conda:
         "envs/basic_tools.yaml"
     threads: workflow.cores
@@ -333,6 +339,30 @@ rule map_nanopore_reads_to_assembly:
         samtools index -c {output.bam_med}
         rm {output.bam_med}.unsorted.bam
         
+        """
+
+
+rule filter_mapq_zero_reads:
+    input:
+        bam_long=os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted_full.bam"),
+        bam_med=os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted_full.bam")
+    output:
+        bam_long=os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction.sorted.bam"),
+        bam_med=os.path.join(ONT_MAPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction.sorted.bam")
+    conda:
+        "envs/pysam.yaml"
+    threads: workflow.cores
+    log: os.path.join(OUTPUT_DIR, "logs/filter_mapq_zero_reads.log")
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        filter_bam2.py --bam {input.bam_long} --out {output.bam_long} --min_mapq 1 --threads {threads} > {log} 2>&1 &
+        filter_bam2.py --bam {input.bam_med} --out {output.bam_med} --min_mapq 1 --threads {threads} > {log} 2>&1 &
+        wait
+        # make csi index
+        samtools index -c {output.bam_long}
+        samtools index -c {output.bam_med}
         """
 
 
@@ -375,6 +405,36 @@ rule get_zero_coverage:
         zero_coverage.py --bam {input.bam_mid} --out {output.zero_coverage_bed_mid} &
         wait
         """
+
+rule dotplot_from_bed:
+    input:
+        bed1=os.path.join(CLIPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_zero_coverage.bed"),
+        bed2=os.path.join(CLIPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_midsized_fraction_zero_coverage.bed"),
+        clipping_long=os.path.join(CLIPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_clip_info.tsv"),
+        assembly=os.path.join(OUTPUT_DIR,"hifiasm_assembly.bp.p_ctg.gfa.fasta")
+    output:
+        dotplot_done=os.path.join(CLIPPING_DIR, "dotplots_done.txt")
+    params:
+        dotplot_dir = CLIPPING_DIR,
+        bed_left = os.path.join(CLIPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_left_span.bed"),
+        bed_right = os.path.join(CLIPPING_DIR, "hifiasm_assembly.bp.p_ctg.gfa_mapped_longest_fraction_right_span.bed"),
+        clipping_dir = CLIPPING_DIR
+    threads: workflow.cores
+    log: "logs/dotplot_from_bed.log"
+    conda:
+        "envs/pysam.yaml"
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        dotplots_from_bed.py --bed {input.bed1} --out_dir {params.dotplot_dir}/zero_coverage_long --genome_fasta {input.assembly} --cpu {threads}
+        dotplots_from_bed.py --bed {input.bed2} --out_dir {params.dotplot_dir}/zero_coverage_mid --genome_fasta {input.assembly} --cpu {threads}
+        dotplots_from_bed.py --bed {params.bed_left} --out_dir {params.clipping_dir}/left_span --genome_fasta {input.assembly} --cpu {threads}
+        dotplots_from_bed.py --bed {params.bed_right} --out_dir {params.clipping_dir}/right_span --genome_fasta {input.assembly} --cpu {threads}
+        touch {output.dotplot_done}
+        """
+
+
 
 
 rule extract_contig_ends:
@@ -424,4 +484,13 @@ rule run_tidecluster:
         """
         TideCluster.py run_all -f {input.assembly} -pr {params.prefix} -l {input.library} -c {threads}
         touch {output.tidecluster}  
+        """
+
+rule add_igv_xml_file:
+    output:
+        igv_xml=os.path.join(IGV, "igv.xml")
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        cp $scripts_dir/igv_session_relative_path.xml {output.igv_xml}
         """
