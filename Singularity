@@ -50,6 +50,9 @@ From: continuumio/miniconda3@sha256:3a2017213a16daff5bc8dec8571354249c3370d6b0d6
     # this creates the conda environments but does not run the pipeline
     snakemake --use-conda --conda-prefix /opt/conda/envs --conda-create-envs-only --cores 4 --configfile /opt/pipeline/config.yaml
 
+    # use config/ opt/pipeline/envs/pysam.yaml to create the pysam environment
+    mamba env create -f /opt/pipeline/envs/pysam.yaml
+
     # Clean up
     mamba clean --all
 

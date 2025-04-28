@@ -99,11 +99,11 @@ def main():
     # Set cache directory for Snakemake to use.
     cache_dir = os.path.join(output_dir, ".cache")
 
-    # Construct the Snakemake command.
+    # Construct the Snakemake command. do not delete file is --keep-going is used
     cmd = (f"snakemake --snakefile {snakefile} --configfile {args.config} "
            f"--cores {args.threads} --use-conda --conda-prefix {conda_envs_path} "
            f"--conda-frontend mamba --show-failed-logs {args.snakemake_args}"
-           " --keep-going --verbose")
+           " --keep-going --verbose --keep-incomplete")
 
     # Update environment with cache directory.
     env = os.environ.copy()

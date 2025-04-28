@@ -91,12 +91,12 @@ To build the container locally, execute the following command (adjust the image 
 
 ```bash
 SINGULARITY=$(which singularity)
-sudo ionice -c3 $SINGULARITY build images/genome_assembly_pipeline_v6.sif Singularity
+sudo ionice -c3 $SINGULARITY build images/genome_assembly_pipeline_v9.sif Singularity
 ```
 
 ## Testing the Pipeline
 ```bash
-singularity run -B /mnt -B $PWD images/genome_assembly_pipeline_v5.sif -c config.yaml -t 6
+singularity run -B /mnt -B $PWD images/genome_assembly_pipeline_v8.sif -c config.yaml -t 6
 ```
 
 
@@ -106,7 +106,5 @@ singularity run -B /mnt -B $PWD images/genome_assembly_pipeline_v5.sif -c config
 Verify that the paths in your `config.yaml` are correct and that the directories are correctly bound (using `-B`) when running the container.
 - **Permission Issues:** 
 Ensure that the output directory is writable. If you receive permission errors, adjust your bind mounts or output directory paths.
-- **Pipeline Errors:** 
-Check the log files in the `.snakemake/log/` directory for detailed error messages and troubleshooting hints.
-
+- 06
 
