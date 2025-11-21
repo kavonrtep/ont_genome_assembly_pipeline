@@ -78,8 +78,10 @@ From: continuumio/miniconda3@sha256:3a2017213a16daff5bc8dec8571354249c3370d6b0d6
     Snakefile /opt/pipeline/Snakefile
     config_template.yaml /opt/pipeline/config.yaml
     run_pipeline.py /opt/pipeline/run_pipeline.py
+    run_mapping.py /opt/pipeline/run_mapping.py
     scripts /opt/pipeline/scripts
     gepard-1.30 /opt/gepard-1.30
+    Snakefile_mapping /opt/pipeline/Snakefile_mapping
 
 
 

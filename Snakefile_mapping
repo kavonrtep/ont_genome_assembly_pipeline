@@ -1,0 +1,396 @@
+configfile: "config.yaml"
+
+import os
+
+# Define directories based on config
+OUTPUT_DIR    = config["output_dir"]
+DATA_DIR      = os.path.join(OUTPUT_DIR, "data")
+ANALYSIS_DIR  = os.path.join(OUTPUT_DIR, "analysis")
+ONT_MAPPING_DIR  = os.path.join(ANALYSIS_DIR, "mapping_ONT_reads")
+HIFI_MAPPING_DIR = os.path.join(ANALYSIS_DIR, "mapping_HiFi_reads")
+CLIPPING_DIR  = os.path.join(ANALYSIS_DIR, "clipping_info")
+CONTIG_PAIRS_DIR = os.path.join(ANALYSIS_DIR, "contig_pairs")
+TIDECLUSTER_DIR = os.path.join(ANALYSIS_DIR, "tidecluster")
+GENOME_DOTPLOT_DIR = os.path.join(ANALYSIS_DIR, "genome_dotplots")
+IGV = os.path.join(ANALYSIS_DIR, "igv")
+
+# Create required output directories if they don't exist
+def create_dirs(*dirs):
+    for d in dirs:
+        if not os.path.exists(d):
+            os.makedirs(d)
+
+create_dirs(OUTPUT_DIR, ANALYSIS_DIR, DATA_DIR,
+            ONT_MAPPING_DIR, HIFI_MAPPING_DIR, CLIPPING_DIR, CONTIG_PAIRS_DIR,
+            TIDECLUSTER_DIR, GENOME_DOTPLOT_DIR, IGV)
+print("Output directory structure created:", os.listdir(OUTPUT_DIR))
+
+# Final targets: mapping outputs and subsequent analysis
+rule all:
+    input:
+        # ONT mapping outputs
+        os.path.join(ONT_MAPPING_DIR, "ont_mapped.sorted.bam"),
+        # HiFi mapping outputs
+        os.path.join(HIFI_MAPPING_DIR, "hifi_mapped.sorted.bam"),
+        # Clipping analysis
+        os.path.join(CLIPPING_DIR, "ont_mapped_clip_info.tsv"),
+        os.path.join(CLIPPING_DIR, "hifi_mapped_clip_info.tsv"),
+        # Zero coverage analysis
+        os.path.join(CLIPPING_DIR, "ont_mapped_zero_coverage.bed"),
+        os.path.join(CLIPPING_DIR, "hifi_mapped_zero_coverage.bed"),
+        # Dotplots
+        os.path.join(CLIPPING_DIR, "dotplots_done.txt"),
+        # Contig pairs analysis
+        os.path.join(CONTIG_PAIRS_DIR, "contig_pairs_ont.csv"),
+        os.path.join(CONTIG_PAIRS_DIR, "contig_pairs_hifi.csv"),
+        # IGV session
+        os.path.join(IGV, "igv.xml")
+
+####################################################################
+# 1. Prepare assembly and create indices
+####################################################################
+
+rule prepare_assembly:
+    input:
+        assembly = config["genome_assembly"]
+    output:
+        assembly_link = os.path.join(DATA_DIR, "genome_assembly.fasta"),
+        index = os.path.join(DATA_DIR, "genome_assembly.fasta.fai"),
+        db = os.path.join(DATA_DIR, "genome_assembly.fasta.nhr")
+    conda:
+        "envs/basic_tools.yaml"
+    threads: 1
+    shell:
+        """
+        # Create symbolic link to assembly
+        ln -sf $(realpath {input.assembly}) {output.assembly_link}
+        
+        # Create samtools index
+        samtools faidx {output.assembly_link}
+        
+        # Create BLAST database
+        makeblastdb -in {output.assembly_link} -dbtype nucl
+        """
+
+####################################################################
+# 2. Convert ONT FASTQ to FASTA
+####################################################################
+
+rule convert_ont_fastq_to_fasta:
+    input:
+        fastq = config["oxford_nanopore_reads"]
+    output:
+        fasta = os.path.join(DATA_DIR, "ont_reads.fasta")
+    conda:
+        "envs/pysam.yaml"
+    threads: 1
+    log:
+        "logs/convert_ont_fastq_to_fasta.log"
+    shell:
+        """
+        seqkit fq2fa {input.fastq} > {output.fasta} 2> {log}
+        """
+
+####################################################################
+# 3. Convert HiFi FASTQ to FASTA
+####################################################################
+
+rule convert_hifi_fastq_to_fasta:
+    input:
+        fastq = config["hifi_reads"]
+    output:
+        fasta = os.path.join(DATA_DIR, "hifi_reads.fasta")
+    conda:
+        "envs/pysam.yaml"
+    threads: 1
+    log:
+        "logs/convert_hifi_fastq_to_fasta.log"
+    shell:
+        """
+        # Handle both .gz and uncompressed files
+        if [[ {input.fastq} == *.gz ]]; then
+            zcat {input.fastq} | seqkit fq2fa > {output.fasta} 2> {log}
+        else
+            seqkit fq2fa {input.fastq} > {output.fasta} 2> {log}
+        fi
+        """
+
+####################################################################
+# 4. Map ONT reads to assembly using dorado
+####################################################################
+
+rule map_ont_reads_to_assembly:
+    input:
+        assembly = os.path.join(DATA_DIR, "genome_assembly.fasta"),
+        fastq = config["oxford_nanopore_reads"]
+    output:
+        bam = os.path.join(ONT_MAPPING_DIR, "ont_mapped.sorted_full.bam")
+    conda:
+        "envs/basic_tools.yaml"
+    threads: workflow.cores
+    log: "logs/map_ont_reads_to_assembly.log"
+    shell:
+        """
+        # Map with dorado aligner
+        dorado aligner {input.assembly} {input.fastq} 2> {log} | \
+        samtools sort -@ {threads} -o {output.bam} -
+        
+        # Index the BAM file
+        samtools index -c {output.bam}
+        """
+
+####################################################################
+# 5. Map HiFi reads to assembly using minimap2
+####################################################################
+
+rule map_hifi_reads_to_assembly:
+    input:
+        assembly = os.path.join(DATA_DIR, "genome_assembly.fasta"),
+        fastq = config["hifi_reads"]
+    output:
+        bam = os.path.join(HIFI_MAPPING_DIR, "hifi_mapped.sorted_full.bam")
+    conda:
+        "envs/basic_tools.yaml"
+    threads: workflow.cores
+    log: "logs/map_hifi_reads_to_assembly.log"
+    shell:
+        """
+        # Map with minimap2 for HiFi reads
+        minimap2 -ax map-hifi -t {threads} {input.assembly} {input.fastq} 2> {log} | \
+        samtools sort -@ {threads} -o {output.bam} -
+        
+        # Index the BAM file
+        samtools index -c {output.bam}
+        """
+
+####################################################################
+# 6. Filter MAPQ zero reads for both ONT and HiFi
+####################################################################
+
+rule filter_ont_mapq_zero_reads:
+    input:
+        bam = os.path.join(ONT_MAPPING_DIR, "ont_mapped.sorted_full.bam")
+    output:
+        bam = os.path.join(ONT_MAPPING_DIR, "ont_mapped.sorted.bam")
+    conda:
+        "envs/pysam.yaml"
+    threads: workflow.cores
+    log: "logs/filter_ont_mapq_zero_reads.log"
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        filter_bam2.py --bam {input.bam} --out {output.bam} --min_mapq 1 --threads {threads} > {log} 2>&1
+        
+        # Create CSI index
+        samtools index -c {output.bam}
+        """
+
+rule filter_hifi_mapq_zero_reads:
+    input:
+        bam = os.path.join(HIFI_MAPPING_DIR, "hifi_mapped.sorted_full.bam")
+    output:
+        bam = os.path.join(HIFI_MAPPING_DIR, "hifi_mapped.sorted.bam")
+    conda:
+        "envs/pysam.yaml"
+    threads: workflow.cores
+    log: "logs/filter_hifi_mapq_zero_reads.log"
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        filter_bam2.py --bam {input.bam} --out {output.bam} --min_mapq 1 --threads {threads} > {log} 2>&1
+        
+        # Create CSI index
+        samtools index -c {output.bam}
+        """
+
+####################################################################
+# 7. Detect clipping for both ONT and HiFi reads
+####################################################################
+
+rule detect_ont_clipping:
+    input:
+        bam = os.path.join(ONT_MAPPING_DIR, "ont_mapped.sorted.bam")
+    output:
+        clipping = os.path.join(CLIPPING_DIR, "ont_mapped_clip_info.tsv")
+    conda:
+        "envs/pysam.yaml"
+    params:
+        prefix = os.path.join(CLIPPING_DIR, "ont_mapped")
+    threads: 1
+    log: "logs/detect_ont_clipping.log"
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        detect_clipping.py --bam {input.bam} --min_clip 10000 --add_coverage --out {params.prefix} > {log} 2>&1
+        """
+
+rule detect_hifi_clipping:
+    input:
+        bam = os.path.join(HIFI_MAPPING_DIR, "hifi_mapped.sorted.bam")
+    output:
+        clipping = os.path.join(CLIPPING_DIR, "hifi_mapped_clip_info.tsv")
+    conda:
+        "envs/pysam.yaml"
+    params:
+        prefix = os.path.join(CLIPPING_DIR, "hifi_mapped")
+    threads: 1
+    log: "logs/detect_hifi_clipping.log"
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        detect_clipping.py --bam {input.bam} --min_clip 5000 --add_coverage --out {params.prefix} > {log} 2>&1
+        """
+
+####################################################################
+# 8. Get zero coverage regions for both ONT and HiFi
+####################################################################
+
+rule get_zero_coverage:
+    input:
+        bam_ont = os.path.join(ONT_MAPPING_DIR, "ont_mapped.sorted.bam"),
+        bam_hifi = os.path.join(HIFI_MAPPING_DIR, "hifi_mapped.sorted.bam")
+    output:
+        zero_coverage_ont = os.path.join(CLIPPING_DIR, "ont_mapped_zero_coverage.bed"),
+        zero_coverage_hifi = os.path.join(CLIPPING_DIR, "hifi_mapped_zero_coverage.bed")
+    conda:
+        "envs/pysam.yaml"
+    threads: 2
+    log: "logs/get_zero_coverage.log"
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        zero_coverage.py --bam {input.bam_ont} --out {output.zero_coverage_ont} &
+        zero_coverage.py --bam {input.bam_hifi} --out {output.zero_coverage_hifi} &
+        wait
+        """
+
+####################################################################
+# 9. Create dotplots from BED files
+####################################################################
+
+rule dotplot_from_bed:
+    input:
+        bed_ont = os.path.join(CLIPPING_DIR, "ont_mapped_zero_coverage.bed"),
+        bed_hifi = os.path.join(CLIPPING_DIR, "hifi_mapped_zero_coverage.bed"),
+        clipping_ont = os.path.join(CLIPPING_DIR, "ont_mapped_clip_info.tsv"),
+        clipping_hifi = os.path.join(CLIPPING_DIR, "hifi_mapped_clip_info.tsv"),
+        assembly = os.path.join(DATA_DIR, "genome_assembly.fasta")
+    output:
+        dotplot_done = os.path.join(CLIPPING_DIR, "dotplots_done.txt")
+    params:
+        dotplot_dir = CLIPPING_DIR,
+        bed_ont_left = os.path.join(CLIPPING_DIR, "ont_mapped_left_span.bed"),
+        bed_ont_right = os.path.join(CLIPPING_DIR, "ont_mapped_right_span.bed"),
+        bed_hifi_left = os.path.join(CLIPPING_DIR, "hifi_mapped_left_span.bed"),
+        bed_hifi_right = os.path.join(CLIPPING_DIR, "hifi_mapped_right_span.bed")
+    threads: workflow.cores
+    log: "logs/dotplot_from_bed.log"
+    conda:
+        "envs/pysam.yaml"
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        
+        # Create dotplots for zero coverage regions
+        dotplots_from_bed.py --bed {input.bed_ont} --out_dir {params.dotplot_dir}/zero_coverage_ont --genome_fasta {input.assembly} --cpu {threads} &
+        dotplots_from_bed.py --bed {input.bed_hifi} --out_dir {params.dotplot_dir}/zero_coverage_hifi --genome_fasta {input.assembly} --cpu {threads} &
+        
+        # Create dotplots for clipping spans (if files exist)
+        if [ -f {params.bed_ont_left} ]; then
+            dotplots_from_bed.py --bed {params.bed_ont_left} --out_dir {params.dotplot_dir}/ont_left_span --genome_fasta {input.assembly} --cpu {threads} &
+        fi
+        if [ -f {params.bed_ont_right} ]; then
+            dotplots_from_bed.py --bed {params.bed_ont_right} --out_dir {params.dotplot_dir}/ont_right_span --genome_fasta {input.assembly} --cpu {threads} &
+        fi
+        if [ -f {params.bed_hifi_left} ]; then
+            dotplots_from_bed.py --bed {params.bed_hifi_left} --out_dir {params.dotplot_dir}/hifi_left_span --genome_fasta {input.assembly} --cpu {threads} &
+        fi
+        if [ -f {params.bed_hifi_right} ]; then
+            dotplots_from_bed.py --bed {params.bed_hifi_right} --out_dir {params.dotplot_dir}/hifi_right_span --genome_fasta {input.assembly} --cpu {threads} &
+        fi
+        
+        wait
+        touch {output.dotplot_done}
+        """
+
+####################################################################
+# 10. Extract contig ends for both ONT and HiFi
+####################################################################
+
+rule extract_ont_contig_ends:
+    input:
+        assembly = os.path.join(DATA_DIR, "genome_assembly.fasta"),
+        bam = os.path.join(ONT_MAPPING_DIR, "ont_mapped.sorted.bam"),
+        reads = os.path.join(DATA_DIR, "ont_reads.fasta")
+    output:
+        contig_pairs = os.path.join(CONTIG_PAIRS_DIR, "contig_pairs_ont.csv")
+    conda:
+        "envs/pysam.yaml"
+    params:
+        output_dir = os.path.join(CONTIG_PAIRS_DIR, "ont")
+    threads: workflow.cores
+    log: "logs/extract_ont_contig_ends.log"
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        
+        # Create output directory
+        mkdir -p {params.output_dir}
+        
+        # Get contig pairs and extract ends
+        get_contig_pairs_from_bam.py --bam {input.bam} --out {output.contig_pairs}
+        extract_script=$(which extract_contig_ends2.py)
+        run_extract_contig_ends_batch.py --pairs_file {output.contig_pairs} --bam {input.bam} --reads_fasta {input.reads} \
+        --out_dir {params.output_dir} --genome_fasta {input.assembly} --min_aln_length 10000 --extract_script $extract_script \
+        --cpu {threads}
+        """
+
+rule extract_hifi_contig_ends:
+    input:
+        assembly = os.path.join(DATA_DIR, "genome_assembly.fasta"),
+        bam = os.path.join(HIFI_MAPPING_DIR, "hifi_mapped.sorted.bam"),
+        reads = os.path.join(DATA_DIR, "hifi_reads.fasta")
+    output:
+        contig_pairs = os.path.join(CONTIG_PAIRS_DIR, "contig_pairs_hifi.csv")
+    conda:
+        "envs/pysam.yaml"
+    params:
+        output_dir = os.path.join(CONTIG_PAIRS_DIR, "hifi")
+    threads: workflow.cores
+    log: "logs/extract_hifi_contig_ends.log"
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        
+        # Create output directory
+        mkdir -p {params.output_dir}
+        
+        # Get contig pairs and extract ends
+        get_contig_pairs_from_bam.py --bam {input.bam} --out {output.contig_pairs}
+        extract_script=$(which extract_contig_ends2.py)
+        run_extract_contig_ends_batch.py --pairs_file {output.contig_pairs} --bam {input.bam} --reads_fasta {input.reads} \
+        --out_dir {params.output_dir} --genome_fasta {input.assembly} --min_aln_length 5000 --extract_script $extract_script \
+        --cpu {threads}
+        """
+
+
+####################################################################
+# 12. Add IGV XML file
+####################################################################
+
+rule add_igv_xml_file:
+    output:
+        igv_xml = os.path.join(IGV, "igv.xml")
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        cp $scripts_dir/igv_session_relative_path.xml {output.igv_xml}
+        """
