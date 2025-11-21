@@ -62,7 +62,7 @@ From: continuumio/miniconda3@sha256:3a2017213a16daff5bc8dec8571354249c3370d6b0d6
 
     # install hifiasm
     cd /opt
-    git clone https://github.com/chhylp123/hifiasm
+    git clone https://github.com/kavonrtep/hifiasm
     cd hifiasm && make
     cp hifiasm /usr/local/bin
 
