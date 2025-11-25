@@ -63,7 +63,7 @@ From: continuumio/miniconda3@sha256:3a2017213a16daff5bc8dec8571354249c3370d6b0d6
     # install hifiasm
     cd /opt
     git clone https://github.com/kavonrtep/hifiasm
-    cd hifiasm && make
+    cd hifiasm && git checkout 859178d29366d032ea110d3ca0c65f89f7298d00 && make
     cp hifiasm /usr/local/bin
 
     # install dorado

@@ -93,11 +93,13 @@ To build the container locally, execute the following command (adjust the image 
 SINGULARITY=$(which singularity)
 sudo ionice -c3 $SINGULARITY build images/genome_assembly_pipeline_v9.sif Singularity
 sudo ionice -c3 $SINGULARITY build images/genome_assembly_pipeline_v10.sif Singularity
+# hifiasm replaced with my fork
+sudo ionice -c3 $SINGULARITY build images/genome_assembly_pipeline_v11.sif Singularity
 ```
 
 ## Testing the Pipeline
 ```bash
-singularity run -B /mnt -B $PWD images/genome_assembly_pipeline_v8.sif -c config.yaml -t 6
+singularity run -B /mnt -B $PWD images/genome_assembly_pipeline_v11.sif -c config.yaml -t 6
 ```
 
 

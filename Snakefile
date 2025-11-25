@@ -221,7 +221,7 @@ rule hifiasm_assembly:
         """
         scripts_dir=$(realpath scripts)
         export PATH=$scripts_dir:$PATH
-        hifiasm -o {OUTPUT_DIR}/hifiasm_assembly -t {threads} --ont {input.fastq}
+        hifiasm -o {OUTPUT_DIR}/hifiasm_assembly -W -t {threads} --ont {input.fastq}
         """
 
 ####################################################################
