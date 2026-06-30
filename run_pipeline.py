@@ -6,54 +6,151 @@ It is designed to run within your Singularity container.
 
 import argparse
 import os
+import shlex
 import subprocess
 import sys
 import yaml
 
 
-def show_singularity_settings(config_object):
+PIPELINE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+WORKFLOWS = {
+    "pisum": {
+        "snakefile": "Snakefile",
+        "template": "config_template.yaml",
+        "fallback_template": "config.yaml",
+        "output_path": ["output_dir"],
+        "required_files": [
+            "oxford_nanopore_reads", "painting_probes", "assembly_fai_ref",
+            "blast_probes_ref", "tandem_repeats"
+        ],
+    },
+    "legacy": {
+        "snakefile": "Snakefile",
+        "template": "config_template.yaml",
+        "fallback_template": "config.yaml",
+        "output_path": ["output_dir"],
+        "required_files": [
+            "oxford_nanopore_reads", "painting_probes", "assembly_fai_ref",
+            "blast_probes_ref", "tandem_repeats"
+        ],
+    },
+    "generic": {
+        "snakefile": "Snakefile_generic",
+        "template": "config_generic_template.yaml",
+        "fallback_template": None,
+        "output_path": ["outputs", "output_dir"],
+        "required_files": [
+            "reads.ont_fastq", "contamination_filter.plastid_db",
+            "contamination_filter.mitochondrial_db"
+        ],
+    },
+    "mapping": {
+        "snakefile": "Snakefile_mapping",
+        "template": "config_mapping_template.yaml",
+        "fallback_template": None,
+        "output_path": ["output_dir"],
+        "required_files": [
+            "genome_assembly", "oxford_nanopore_reads", "hifi_reads",
+            "tandem_repeats"
+        ],
+    },
+}
+
+
+def pipeline_path(filename):
+    return os.path.join(PIPELINE_DIR, filename)
+
+
+def config_get(config_object, dotted_key, default=None):
+    value = config_object
+    for key in dotted_key.split("."):
+        if not isinstance(value, dict) or key not in value:
+            return default
+        value = value[key]
+    return value
+
+
+def config_get_path(config_object, path, default=None):
+    value = config_object
+    for key in path:
+        if not isinstance(value, dict) or key not in value:
+            return default
+        value = value[key]
+    return value
+
+
+def read_template(workflow_name):
+    workflow = WORKFLOWS[workflow_name]
+    template_candidates = [workflow["template"], workflow.get("fallback_template")]
+    for template_name in template_candidates:
+        if not template_name:
+            continue
+        template_path = pipeline_path(template_name)
+        if os.path.exists(template_path):
+            with open(template_path, 'r') as f:
+                return f.read()
+    return f"Could not read {workflow['template']}."
+
+
+def show_singularity_settings(config_object, workflow_name):
     """
     Print the Singularity bind options based on directories from required files.
     """
-    required_keys = ["oxford_nanopore_reads", "painting_probes", "assembly_fai_ref",
-                     "blast_probes_ref", "tandem_repeats"]
+    workflow = WORKFLOWS[workflow_name]
     dirs = set()
     # Always include the output directory.
-    dirs.add(os.path.abspath(config_object['output_dir']))
-    for key in required_keys:
-        if key in config_object:
-            dirs.add(os.path.dirname(os.path.abspath(config_object[key])))
+    output_dir = config_get_path(config_object, workflow["output_path"], "output")
+    dirs.add(os.path.abspath(output_dir))
+    for key in workflow["required_files"]:
+        path = config_get(config_object, key)
+        if path:
+            dirs.add(os.path.dirname(os.path.abspath(path)))
     bind_string = " ".join([f"-B {d}" for d in dirs])
     print("Run Singularity with the following bind options:")
     print(f"singularity run {bind_string} ...")
 
 
 def main():
-    # Default config template file inside container.
-    config_template = "/opt/pipeline/config.yaml"
-    try:
-        with open(config_template, 'r') as f:
-            config_string = f.read()
-    except Exception:
-        config_string = "Could not read default config template."
-
     parser = argparse.ArgumentParser(
         description="Pipeline for assembly and analysis using Snakemake within a "
                     "Singularity container.",
-        epilog=f"Example config.yaml file:\n\n{config_string}",
+        epilog="Use --print-config-template to inspect a workflow-specific template.",
         formatter_class=argparse.RawDescriptionHelpFormatter
         )
-    parser.add_argument('-c', '--config', required=True, help='Path to config file')
+    parser.add_argument(
+        '-w', '--workflow', choices=sorted(WORKFLOWS), default='pisum',
+        help='Workflow to run. Default keeps the original Pisum/full pipeline.'
+        )
+    parser.add_argument('-c', '--config', required=False, help='Path to config file')
     parser.add_argument(
         '-t', '--threads', required=False, default=2, type=int,
         help='Number of threads to use'
         )
     parser.add_argument(
-        '-S', '--snakemake_args', type=str, nargs='?', default="",
+        '-S', '--snakemake_args', nargs=argparse.REMAINDER, default=[],
         help='Additional snakemake arguments (e.g., "--dry-run --reason"). Do not '
-             'include options that are set by the script.'
+             'include options that are set by the script. Put this option last.'
+        )
+    parser.add_argument(
+        '--conda-frontend', choices=['mamba', 'conda'], default='mamba',
+        help='Conda frontend passed to Snakemake. The container default is mamba.'
+        )
+    parser.add_argument(
+        '--print-config-template', choices=sorted(WORKFLOWS), metavar='WORKFLOW',
+        help='Print a config template for the selected workflow and exit.'
         )
     args = parser.parse_args()
+
+    if args.print_config_template:
+        print(read_template(args.print_config_template))
+        return
+
+    if not args.config:
+        parser.error("-c/--config is required unless --print-config-template is used.")
+
+    workflow_name = args.workflow
+    workflow = WORKFLOWS[workflow_name]
 
     # Load configuration.
     try:
@@ -64,31 +161,43 @@ def main():
         sys.exit(1)
 
     # Create output directory if it does not exist.
-    output_dir = os.path.abspath(config_object.get('output_dir', 'output'))
+    output_dir = os.path.abspath(
+        config_get_path(config_object, workflow["output_path"], "output")
+        )
     if not os.path.exists(output_dir):
         try:
             os.makedirs(output_dir)
         except PermissionError:
             print(f"Cannot create output directory {output_dir}")
-            show_singularity_settings(config_object)
+            show_singularity_settings(config_object, workflow_name)
             sys.exit(1)
 
     # Check that required input files exist.
-    required_files = ["oxford_nanopore_reads", "painting_probes", "assembly_fai_ref",
-                      "blast_probes_ref", "tandem_repeats"]
-    for key in required_files:
-        if key in config_object:
-            path = os.path.abspath(config_object[key])
-            if not os.path.exists(path):
-                print(
-                    f"Required file for '{key}' at {path} does not exist or is not "
-                    f"accessible."
-                    )
-                show_singularity_settings(config_object)
-                sys.exit(1)
+    missing_files = []
+    for key in workflow["required_files"]:
+        configured_path = config_get(config_object, key)
+        if not configured_path:
+            if workflow_name == "generic" and key.startswith("contamination_filter.") \
+                    and config_get(config_object, "contamination_filter.enabled", True) is False:
+                continue
+            missing_files.append(key)
+            continue
+        path = os.path.abspath(configured_path)
+        if not os.path.exists(path):
+            missing_files.append(f"{key} ({path})")
+
+    if missing_files:
+        print("Missing or inaccessible required input(s):")
+        for missing in missing_files:
+            print(f"  - {missing}")
+        show_singularity_settings(config_object, workflow_name)
+        sys.exit(1)
 
     # Set the snakefile path (the file is provided via Singularity %files).
-    snakefile = "/opt/pipeline/Snakefile"
+    snakefile = pipeline_path(workflow["snakefile"])
+    if not os.path.exists(snakefile):
+        print(f"Cannot find workflow Snakefile: {snakefile}")
+        sys.exit(1)
 
     # Retrieve the conda environments path from the environment.
     conda_envs_path = os.environ.get('CONDA_ENVS_PATH')
@@ -100,19 +209,26 @@ def main():
     cache_dir = os.path.join(output_dir, ".cache")
 
     # Construct the Snakemake command. do not delete file is --keep-going is used
-    cmd = (f"snakemake --snakefile {snakefile} --configfile {args.config} "
-           f"--cores {args.threads} --use-conda --conda-prefix {conda_envs_path} "
-           f"--conda-frontend mamba --show-failed-logs {args.snakemake_args}"
-           " --keep-going --verbose --keep-incomplete")
+    cmd = [
+        "snakemake", "--snakefile", snakefile, "--configfile", args.config,
+        "--cores", str(args.threads), "--use-conda", "--conda-prefix",
+        conda_envs_path, "--conda-frontend", args.conda_frontend, "--show-failed-logs",
+        "--keep-going", "--verbose", "--keep-incomplete"
+        ]
+    if args.snakemake_args:
+        extra_args = []
+        for value in args.snakemake_args:
+            extra_args.extend(shlex.split(value))
+        cmd.extend(extra_args)
 
     # Update environment with cache directory.
     env = os.environ.copy()
     env['XDG_CACHE_HOME'] = cache_dir
 
     print("Running Snakemake with the following command:")
-    print(cmd)
+    print(" ".join(shlex.quote(part) for part in cmd))
 
-    subprocess.check_call(cmd, shell=True, env=env)
+    subprocess.check_call(cmd, env=env)
 
 
 if __name__ == "__main__":

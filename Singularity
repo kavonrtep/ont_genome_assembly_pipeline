@@ -63,7 +63,7 @@ From: continuumio/miniconda3@sha256:3a2017213a16daff5bc8dec8571354249c3370d6b0d6
     # install hifiasm
     cd /opt
     git clone https://github.com/kavonrtep/hifiasm
-    cd hifiasm && git checkout 859178d29366d032ea110d3ca0c65f89f7298d00 && make
+    cd hifiasm && git checkout cf27b25413e01032283f5a030baac5dd3f1a8280 && make
     cp hifiasm /usr/local/bin
 
     # install dorado
@@ -76,12 +76,16 @@ From: continuumio/miniconda3@sha256:3a2017213a16daff5bc8dec8571354249c3370d6b0d6
 %files
     envs /opt/pipeline/envs
     Snakefile /opt/pipeline/Snakefile
+    Snakefile_generic /opt/pipeline/Snakefile_generic
+    Snakefile_mapping /opt/pipeline/Snakefile_mapping
     config_template.yaml /opt/pipeline/config.yaml
+    config_template.yaml /opt/pipeline/config_template.yaml
+    config_generic_template.yaml /opt/pipeline/config_generic_template.yaml
+    config_mapping_template.yaml /opt/pipeline/config_mapping_template.yaml
     run_pipeline.py /opt/pipeline/run_pipeline.py
     run_mapping.py /opt/pipeline/run_mapping.py
     scripts /opt/pipeline/scripts
     gepard-1.30 /opt/gepard-1.30
-    Snakefile_mapping /opt/pipeline/Snakefile_mapping
 
 
 
@@ -98,4 +102,4 @@ From: continuumio/miniconda3@sha256:3a2017213a16daff5bc8dec8571354249c3370d6b0d6
     # Navigate to the pipeline directory
     # set cache directory
 
-    /opt/pipeline/run_pipeline.py "$@"
+    exec /opt/pipeline/run_pipeline.py "$@"

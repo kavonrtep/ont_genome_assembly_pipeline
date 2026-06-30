@@ -1,0 +1,39 @@
+# Generic lightweight ONT assembly pipeline configuration
+
+reads:
+  # Raw Oxford Nanopore FASTQ input.
+  ont_fastq: "data/read_all_sample.fastq"
+
+contamination_filter:
+  # Plastid and mitochondrial filtering is enabled by default because it can
+  # substantially improve assembly quality.
+  enabled: true
+  plastid_db: "data/P.fulvum_MW160430.1_plast.fasta"
+  mitochondrial_db: "data/Pisum_fulvum_NC_059792.1_min.fasta"
+  min_coverage: 90
+  min_identity: 90
+  word_size: 21
+
+read_trimming:
+  # Trim short, low-quality adapter-like sequence from read ends before assembly.
+  trim_start: 0
+  trim_end: 0
+
+hifiasm:
+  output_prefix: "assembly"
+  read_type: "ont"
+  base_args: "-W"
+  extra_args: ""
+  # primary keeps the standard p_ctg output as the main assembly. Haplotype or
+  # experimental hifiasm options can be supplied through extra_args.
+  mode: "primary"
+
+outputs:
+  output_dir: "output_generic"
+  keep_filtered_reads: true
+  keep_intermediate_gfa: true
+
+steps:
+  quast: true
+  map_reads_back: false
+  clipping_analysis: false

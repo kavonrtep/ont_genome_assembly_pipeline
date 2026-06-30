@@ -1,0 +1,259 @@
+configfile: "config_generic_template.yaml"
+
+import os
+import glob
+
+
+def cfg(path, default=None):
+    value = config
+    for key in path.split("."):
+        if not isinstance(value, dict) or key not in value:
+            return default
+        value = value[key]
+    return value
+
+
+OUTPUT_DIR = cfg("outputs.output_dir", config.get("output_dir", "output_generic"))
+DATA_DIR = os.path.join(OUTPUT_DIR, "data")
+ASSEMBLY_DIR = os.path.join(OUTPUT_DIR, "assembly")
+QUAST_DIR = os.path.join(OUTPUT_DIR, "quast")
+LOG_DIR = os.path.join(OUTPUT_DIR, "logs")
+MAPPING_DIR = os.path.join(OUTPUT_DIR, "mapping")
+
+ONT_FASTQ = cfg("reads.ont_fastq", config.get("oxford_nanopore_reads"))
+PREFIX = cfg("hifiasm.output_prefix", "assembly")
+READ_TYPE = cfg("hifiasm.read_type", "ont")
+BASE_ARGS = cfg("hifiasm.base_args", "-W")
+EXTRA_ARGS = cfg("hifiasm.extra_args", "")
+TRIM_START = cfg("read_trimming.trim_start", 0)
+TRIM_END = cfg("read_trimming.trim_end", 0)
+FILTER_ENABLED = cfg("contamination_filter.enabled", True)
+PLASTID_DB = cfg("contamination_filter.plastid_db")
+MITO_DB = cfg("contamination_filter.mitochondrial_db")
+MIN_COVERAGE = cfg("contamination_filter.min_coverage", 90)
+MIN_IDENTITY = cfg("contamination_filter.min_identity", 90)
+WORD_SIZE = cfg("contamination_filter.word_size", 21)
+
+
+if not ONT_FASTQ:
+    raise ValueError("Missing reads.ont_fastq in config.")
+if FILTER_ENABLED and (not PLASTID_DB or not MITO_DB):
+    raise ValueError(
+        "contamination_filter.plastid_db and mitochondrial_db are required when "
+        "contamination_filter.enabled is true."
+    )
+if READ_TYPE != "ont":
+    raise ValueError("Snakefile_generic currently supports hifiasm.read_type: ont.")
+
+
+def mkdirs():
+    for path in [OUTPUT_DIR, DATA_DIR, ASSEMBLY_DIR, QUAST_DIR, LOG_DIR, MAPPING_DIR]:
+        os.makedirs(path, exist_ok=True)
+
+
+mkdirs()
+
+
+def selected_targets():
+    targets = [
+        os.path.join(DATA_DIR, "reads.filtered.fastq"),
+        os.path.join(DATA_DIR, "reads.filtered.fasta"),
+        os.path.join(ASSEMBLY_DIR, f"{PREFIX}.hifiasm.done"),
+        os.path.join(ASSEMBLY_DIR, "assembly_fastas.done"),
+        os.path.join(ASSEMBLY_DIR, "assembly.outputs.tsv"),
+    ]
+    if cfg("steps.quast", True):
+        targets.append(os.path.join(QUAST_DIR, "quast_done.txt"))
+    if cfg("steps.map_reads_back", False):
+        targets.extend([
+            os.path.join(MAPPING_DIR, "reads_to_primary.sorted.bam"),
+            os.path.join(MAPPING_DIR, "reads_to_primary.sorted.bam.csi"),
+        ])
+    return targets
+
+
+rule all:
+    input:
+        selected_targets()
+
+
+rule convert_fastq_to_fasta:
+    input:
+        fastq=ONT_FASTQ
+    output:
+        fasta=os.path.join(DATA_DIR, "reads.fasta")
+    conda:
+        "envs/pysam.yaml"
+    log:
+        os.path.join(LOG_DIR, "convert_fastq_to_fasta.log")
+    shell:
+        """
+        seqkit fq2fa {input.fastq} > {output.fasta} 2> {log}
+        """
+
+
+rule detect_contamination_plastid:
+    input:
+        fasta=os.path.join(DATA_DIR, "reads.fasta")
+    output:
+        tsv=os.path.join(DATA_DIR, "contam_plastid.tsv")
+    conda:
+        "envs/pysam.yaml"
+    threads: workflow.cores
+    log:
+        os.path.join(LOG_DIR, "detect_contamination_plastid.log")
+    shell:
+        """
+        if [ "{FILTER_ENABLED}" = "True" ]; then
+            cp {PLASTID_DB} {DATA_DIR}/plastid.fasta
+            makeblastdb -in {DATA_DIR}/plastid.fasta -dbtype nucl > {log} 2>&1
+            detect_contamination.py -i {input.fasta} -o {output.tsv} \
+              --min_coverage {MIN_COVERAGE} --min_identity {MIN_IDENTITY} \
+              --num_cpu {threads} -d {DATA_DIR}/plastid.fasta \
+              --word_size {WORD_SIZE} --raw_blast {DATA_DIR}/plastid.blast \
+              >> {log} 2>&1
+        else
+            printf "ReadID\\tQueryLength\\tAlignedLength\\tCoverage(%%)\\tMeanIdentity(%%)\\n" > {output.tsv}
+        fi
+        """
+
+
+rule detect_contamination_mitochondrial:
+    input:
+        fasta=os.path.join(DATA_DIR, "reads.fasta")
+    output:
+        tsv=os.path.join(DATA_DIR, "contam_mitochondrial.tsv")
+    conda:
+        "envs/pysam.yaml"
+    threads: workflow.cores
+    log:
+        os.path.join(LOG_DIR, "detect_contamination_mitochondrial.log")
+    shell:
+        """
+        if [ "{FILTER_ENABLED}" = "True" ]; then
+            cp {MITO_DB} {DATA_DIR}/mitochondrial.fasta
+            makeblastdb -in {DATA_DIR}/mitochondrial.fasta -dbtype nucl > {log} 2>&1
+            detect_contamination.py -i {input.fasta} -o {output.tsv} \
+              --min_coverage {MIN_COVERAGE} --min_identity {MIN_IDENTITY} \
+              --num_cpu {threads} -d {DATA_DIR}/mitochondrial.fasta \
+              --word_size {WORD_SIZE} --raw_blast {DATA_DIR}/mitochondrial.blast \
+              >> {log} 2>&1
+        else
+            printf "ReadID\\tQueryLength\\tAlignedLength\\tCoverage(%%)\\tMeanIdentity(%%)\\n" > {output.tsv}
+        fi
+        """
+
+
+rule filter_reads:
+    input:
+        fastq=ONT_FASTQ,
+        fasta=os.path.join(DATA_DIR, "reads.fasta"),
+        plastid=os.path.join(DATA_DIR, "contam_plastid.tsv"),
+        mito=os.path.join(DATA_DIR, "contam_mitochondrial.tsv")
+    output:
+        fastq=os.path.join(DATA_DIR, "reads.filtered.fastq"),
+        fasta=os.path.join(DATA_DIR, "reads.filtered.fasta")
+    conda:
+        "envs/pysam.yaml"
+    log:
+        os.path.join(LOG_DIR, "filter_reads.log")
+    shell:
+        """
+        filter_fastq_fasta.py -i {input.fastq} -r {input.plastid} {input.mito} \
+          -o {output.fastq} --format fastq --trim_start {TRIM_START} \
+          --trim_end {TRIM_END} > {log} 2>&1
+        filter_fastq_fasta.py -i {input.fasta} -r {input.plastid} {input.mito} \
+          -o {output.fasta} --format fasta --trim_start {TRIM_START} \
+          --trim_end {TRIM_END} >> {log} 2>&1
+        """
+
+
+rule hifiasm_assembly:
+    input:
+        fastq=os.path.join(DATA_DIR, "reads.filtered.fastq")
+    output:
+        marker=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.hifiasm.done")
+    threads: workflow.cores
+    log:
+        os.path.join(LOG_DIR, "hifiasm.log")
+    shell:
+        """
+        hifiasm -o {ASSEMBLY_DIR}/{PREFIX} -t {threads} {BASE_ARGS} --ont {input.fastq} {EXTRA_ARGS} > {log} 2>&1
+        touch {output.marker}
+        """
+
+
+rule assembly_gfa_manifest:
+    input:
+        marker=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.hifiasm.done")
+    output:
+        manifest=os.path.join(ASSEMBLY_DIR, "assembly.gfa.outputs.tsv")
+    run:
+        gfa_paths = sorted(glob.glob(os.path.join(ASSEMBLY_DIR, f"{PREFIX}*.gfa")))
+        with open(output.manifest, "w") as out:
+            out.write("label\tpath\ttype\n")
+            for path in gfa_paths:
+                label = os.path.basename(path)
+                if path.endswith(".bp.p_ctg.gfa"):
+                    label = "primary"
+                elif ".hap1." in path:
+                    label = "hap1"
+                elif ".hap2." in path:
+                    label = "hap2"
+                elif ".bp.hap" in path:
+                    label = os.path.basename(path).replace(f"{PREFIX}.", "").replace(".gfa", "")
+                out.write(f"{label}\t{path}\tgfa\n")
+
+
+rule gfa_to_fastas:
+    input:
+        manifest=os.path.join(ASSEMBLY_DIR, "assembly.gfa.outputs.tsv")
+    output:
+        primary=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.bp.p_ctg.fasta"),
+        marker=os.path.join(ASSEMBLY_DIR, "assembly_fastas.done"),
+        manifest=os.path.join(ASSEMBLY_DIR, "assembly.outputs.tsv")
+    shell:
+        """
+        cp {input.manifest} {output.manifest}
+        awk 'NR > 1 && $3 == "gfa" {{ print $1"\\t"$2 }}' {input.manifest} | while IFS="$(printf '\\t')" read label gfa; do
+            fasta="${{gfa%.gfa}}.fasta"
+            awk '/^S/{{print ">"$2"\\n"$3}}' "$gfa" | fold > "$fasta"
+            printf "%s_fasta\\t%s\\tfasta\\n" "$label" "$fasta" >> {output.manifest}
+        done
+        touch {output.marker}
+        """
+
+
+rule run_quast:
+    input:
+        primary=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.bp.p_ctg.fasta")
+    output:
+        marker=os.path.join(QUAST_DIR, "quast_done.txt")
+    conda:
+        "envs/quast.yaml"
+    shell:
+        """
+        quast {input.primary} -o {QUAST_DIR}
+        touch {output.marker}
+        """
+
+
+rule map_reads_back:
+    input:
+        marker=os.path.join(ASSEMBLY_DIR, "assembly_fastas.done"),
+        assembly=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.bp.p_ctg.fasta"),
+        fastq=os.path.join(DATA_DIR, "reads.filtered.fastq")
+    output:
+        bam=os.path.join(MAPPING_DIR, "reads_to_primary.sorted.bam"),
+        csi=os.path.join(MAPPING_DIR, "reads_to_primary.sorted.bam.csi")
+    conda:
+        "envs/basic_tools.yaml"
+    threads: workflow.cores
+    log:
+        os.path.join(LOG_DIR, "map_reads_back.log")
+    shell:
+        """
+        dorado aligner {input.assembly} {input.fastq} 2> {log} | \
+          samtools sort -@ {threads} -o {output.bam} -
+        samtools index -c {output.bam}
+        """

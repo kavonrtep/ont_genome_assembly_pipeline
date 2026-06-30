@@ -1,0 +1,11 @@
+# Mapping-only workflow configuration
+
+genome_assembly: "/path/to/genome_assembly.fasta"
+oxford_nanopore_reads: "/path/to/ont_reads.fastq"
+hifi_reads: "/path/to/hifi_reads.fastq.gz"
+tandem_repeats: "/path/to/tandem_repeats.fasta"
+
+output_dir: "mapping_output"
+
+# Optional filtering threshold used by Snakefile_mapping.
+min_mapq: 1

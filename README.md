@@ -26,8 +26,11 @@ The container is built from a Singularity definition file that installs:
 The following key files are included inside the container:
  
 - **Singularity definition file**  (used to build the image)
-- **Snakefile**  – defines the pipeline rules
+- **Snakefile**  – defines the original Pisum-oriented/full pipeline rules
+- **Snakefile_generic**  – defines the generic lightweight assembly workflow
+- **Snakefile_mapping**  – defines the mapping-only workflow
 - **config_template.yaml**  – a template for user configuration
+- **config_generic_template.yaml**  – a template for generic assembly runs
 - **run_pipeline.py**  – the script that launches the pipeline
 
 
@@ -65,6 +68,23 @@ singularity run -B /path/to/data -B $PWD genome_assembly_pipeline.sif -c config.
 - The `-B` flag binds host directories so that input/output files are accessible inside the container.
 - The `-c` option specifies the path to your configuration file.
 - The `-t` option sets the number of threads to use during execution.
+- The default workflow is the original Pisum/full workflow.
+
+To run the generic lightweight assembly workflow, select it explicitly:
+
+```bash
+singularity run -B /path/to/data -B $PWD genome_assembly_pipeline.sif \
+  -w generic -c config_generic.yaml -t 20
+```
+
+To inspect a workflow-specific config template from the container:
+
+```bash
+singularity run genome_assembly_pipeline.sif --print-config-template generic
+singularity run genome_assembly_pipeline.sif --print-config-template pisum
+```
+
+The generic workflow keeps plastid and mitochondrial read filtering plus read-end trimming, exposes hifiasm arguments through config, and skips read-back mapping unless `steps.map_reads_back: true`.
 
 
 ## Running on a Cluster 
@@ -95,11 +115,15 @@ sudo ionice -c3 $SINGULARITY build images/genome_assembly_pipeline_v9.sif Singul
 sudo ionice -c3 $SINGULARITY build images/genome_assembly_pipeline_v10.sif Singularity
 # hifiasm replaced with my fork
 sudo ionice -c3 $SINGULARITY build images/genome_assembly_pipeline_v11.sif Singularity
+sudo ionice -c3 $SINGULARITY build images/genome_assembly_pipeline_v12.sif Singularity
 ```
 
 ## Testing the Pipeline
 ```bash
-singularity run -B /mnt -B $PWD images/genome_assembly_pipeline_v11.sif -c config.yaml -t 6
+singularity run -B /mnt -B $PWD images/genome_assembly_pipeline_v12.sif -c config.yaml -t 6
+
+singularity run -B /mnt -B $PWD images/genome_assembly_pipeline_v12.sif \
+  -w generic -c config_generic.yaml -t 6 -S "--dry-run"
 ```
 
 
@@ -110,4 +134,3 @@ Verify that the paths in your `config.yaml` are correct and that the directories
 - **Permission Issues:** 
 Ensure that the output directory is writable. If you receive permission errors, adjust your bind mounts or output directory paths.
 - 06
-
