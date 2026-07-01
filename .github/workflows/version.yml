@@ -34,14 +34,7 @@ jobs:
       - name: Parse version.py
         id: parse
         run: |
-          v=$(python <<'PY'
-          import sys
-          sys.path.insert(0, '.')
-          from version import __version__, parse_version
-          parse_version(__version__)
-          print(__version__)
-          PY
-          )
+          v=$(python -c "import sys; sys.path.insert(0, '.'); from version import __version__, parse_version; parse_version(__version__); print(__version__)")
           echo "Pipeline version: $v"
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
@@ -68,21 +61,9 @@ jobs:
             exit 0
           fi
           if git show "${prev_sha}:version.py" > /tmp/prev_version.py 2>/dev/null; then
-            prev=$(python <<'PY'
-            import importlib.util
-            spec = importlib.util.spec_from_file_location('prev_version', '/tmp/prev_version.py')
-            m = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(m)
-            print(m.__version__)
-            PY
-            )
+            prev=$(python -c "import importlib.util; s=importlib.util.spec_from_file_location('prev_version','/tmp/prev_version.py'); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); print(m.__version__)")
             echo "previous: $prev   new: $PY_VERSION"
-            python <<PY
-            from packaging.version import Version
-            prev, curr = Version("$prev"), Version("$PY_VERSION")
-            assert curr >= prev, f"version went backwards: {prev} -> {curr}"
-            print(f"OK: {prev} <= {curr}")
-            PY
+            python -c "from packaging.version import Version; prev, curr = Version('$prev'), Version('$PY_VERSION'); assert curr >= prev, f'version went backwards: {prev} -> {curr}'; print(f'OK: {prev} <= {curr}')"
           else
             echo "version.py absent on previous main commit; skipping monotonic check."
           fi
