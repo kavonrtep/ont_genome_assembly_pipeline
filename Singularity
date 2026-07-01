@@ -45,6 +45,8 @@ From: continuumio/miniconda3@sha256:3a2017213a16daff5bc8dec8571354249c3370d6b0d6
     touch /opt/pipeline/data/FabTR_all_sequences_231010.db.RM_format
     touch /opt/pipeline/data/Cameor_v2_release_2_chromosomes_only.fasta_all.NGSfilter_CamIllumina.selected.CLEAN.fasta
     touch /opt/pipeline/data/JI1006_fulvum_v2.1.fasta.fai
+    mkdir -p /opt/pipeline/data/JI1006__2024-12-10_ver2.1
+    touch /opt/pipeline/data/JI1006__2024-12-10_ver2.1/JI1006_fulvum_v2.1.fasta.fai
     touch /opt/pipeline/data/JI1006_v2.1_x_oligos_CAMv2r2.blast_out
 
     # this creates the conda environments but does not run the pipeline
@@ -73,6 +75,19 @@ From: continuumio/miniconda3@sha256:3a2017213a16daff5bc8dec8571354249c3370d6b0d6
     ln -s /opt/dorado-0.9.1-linux-x64/bin/dorado /usr/local/bin/dorado
     rm dorado-0.9.1-linux-x64.tar.gz
 
+    # Stamp image labels from version.py so the release artefact carries
+    # the pipeline source version it was built from.
+    PIPELINE_VERSION=$(python3 /opt/pipeline/version.py)
+    BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    mkdir -p /.singularity.d
+    cat > /.singularity.d/labels.json <<EOF
+{
+    "Version": "${PIPELINE_VERSION}",
+    "Build-Date": "${BUILD_DATE}"
+}
+EOF
+    echo "Stamped container labels: Version=${PIPELINE_VERSION} Build-Date=${BUILD_DATE}"
+
 %files
     envs /opt/pipeline/envs
     Snakefile /opt/pipeline/Snakefile
@@ -84,6 +99,7 @@ From: continuumio/miniconda3@sha256:3a2017213a16daff5bc8dec8571354249c3370d6b0d6
     config_mapping_template.yaml /opt/pipeline/config_mapping_template.yaml
     run_pipeline.py /opt/pipeline/run_pipeline.py
     run_mapping.py /opt/pipeline/run_mapping.py
+    version.py /opt/pipeline/version.py
     scripts /opt/pipeline/scripts
     gepard-1.30 /opt/gepard-1.30
 

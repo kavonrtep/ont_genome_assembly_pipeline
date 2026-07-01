@@ -1,0 +1,26 @@
+reads:
+  ont_fastq: "tests/fixtures/data/pacbio_hifi_reads25.fastq"
+
+contamination_filter:
+  enabled: false
+
+read_trimming:
+  trim_start: 0
+  trim_end: 0
+
+hifiasm:
+  output_prefix: "assembly"
+  read_type: "hifi"
+  base_args: "-f0"
+  extra_args: "-l0"
+  mode: "primary"
+
+outputs:
+  output_dir: "tests/fixtures/output_bioinformatics_hifi"
+  keep_filtered_reads: true
+  keep_intermediate_gfa: true
+
+steps:
+  quast: true
+  map_reads_back: false
+  clipping_analysis: false

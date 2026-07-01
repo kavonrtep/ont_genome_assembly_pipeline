@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+
+# Downloaded CI fixture data and generated fixture outputs.
+tests/fixtures/data/
+tests/fixtures/output_*/

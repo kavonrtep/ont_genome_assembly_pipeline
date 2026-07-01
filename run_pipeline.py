@@ -11,6 +11,8 @@ import subprocess
 import sys
 import yaml
 
+from version import __version__
+
 
 PIPELINE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -140,7 +142,15 @@ def main():
         '--print-config-template', choices=sorted(WORKFLOWS), metavar='WORKFLOW',
         help='Print a config template for the selected workflow and exit.'
         )
+    parser.add_argument(
+        '--version', action='store_true',
+        help='Print the pipeline version and exit.'
+        )
     args = parser.parse_args()
+
+    if args.version:
+        print(f"genome_assembly_pipeline {__version__}")
+        return
 
     if args.print_config_template:
         print(read_template(args.print_config_template))
@@ -151,6 +161,8 @@ def main():
 
     workflow_name = args.workflow
     workflow = WORKFLOWS[workflow_name]
+    print(f"Genome assembly pipeline version: {__version__}")
+    print(f"Workflow: {workflow_name}")
 
     # Load configuration.
     try:

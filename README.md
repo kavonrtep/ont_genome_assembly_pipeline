@@ -82,6 +82,7 @@ To inspect a workflow-specific config template from the container:
 ```bash
 singularity run genome_assembly_pipeline.sif --print-config-template generic
 singularity run genome_assembly_pipeline.sif --print-config-template pisum
+singularity run genome_assembly_pipeline.sif --version
 ```
 
 The generic workflow keeps plastid and mitochondrial read filtering plus read-end trimming, exposes hifiasm arguments through config, and skips read-back mapping unless `steps.map_reads_back: true`.
@@ -107,6 +108,27 @@ After successful execution, the output directory (as specified in `config.yaml`)
 
 ## Building the Singularity Container 
 
+Release images are built automatically by GitHub Actions when a version tag is pushed. The version is defined in `version.py`, and tags must match it exactly:
+
+```bash
+python version.py
+git tag 0.1.0
+git push origin 0.1.0
+```
+
+The release workflow builds the SIF, runs the Bioinformatics HiFi fixture inside the built container, pushes the image to GHCR, and creates a GitHub Release. Users can pull a released image with:
+
+```bash
+apptainer pull oras://ghcr.io/kavonrtep/ont_genome_assembly_pipeline/sif:0.1.0
+apptainer pull oras://ghcr.io/kavonrtep/ont_genome_assembly_pipeline/sif:latest
+```
+
+Inspect the embedded version labels with:
+
+```bash
+singularity inspect --labels genome_assembly_pipeline_0.1.0.sif
+```
+
 To build the container locally, execute the following command (adjust the image name and Singularity path as needed):
 
 ```bash
@@ -124,6 +146,14 @@ singularity run -B /mnt -B $PWD images/genome_assembly_pipeline_v12.sif -c confi
 
 singularity run -B /mnt -B $PWD images/genome_assembly_pipeline_v12.sif \
   -w generic -c config_generic.yaml -t 6 -S "--dry-run"
+```
+
+The release fixture uses the PacBio HiFi training data from `kavonrtep/bioinformatics`:
+
+```bash
+tests/fixtures/fetch_bioinformatics_hifi_fixture.sh
+singularity run -B $PWD images/genome_assembly_pipeline_v12.sif \
+  -w generic -c tests/fixtures/config_bioinformatics_hifi.yaml -t 2
 ```
 
 

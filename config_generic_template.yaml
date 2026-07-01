@@ -21,6 +21,8 @@ read_trimming:
 
 hifiasm:
   output_prefix: "assembly"
+  # Supported values: ont, hifi. ONT runs add --ont; HiFi runs use hifiasm's
+  # default read mode.
   read_type: "ont"
   base_args: "-W"
   extra_args: ""

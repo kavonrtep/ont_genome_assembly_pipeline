@@ -23,6 +23,10 @@ MAPPING_DIR = os.path.join(OUTPUT_DIR, "mapping")
 ONT_FASTQ = cfg("reads.ont_fastq", config.get("oxford_nanopore_reads"))
 PREFIX = cfg("hifiasm.output_prefix", "assembly")
 READ_TYPE = cfg("hifiasm.read_type", "ont")
+READ_TYPE_FLAGS = {
+    "ont": "--ont",
+    "hifi": "",
+}
 BASE_ARGS = cfg("hifiasm.base_args", "-W")
 EXTRA_ARGS = cfg("hifiasm.extra_args", "")
 TRIM_START = cfg("read_trimming.trim_start", 0)
@@ -42,8 +46,9 @@ if FILTER_ENABLED and (not PLASTID_DB or not MITO_DB):
         "contamination_filter.plastid_db and mitochondrial_db are required when "
         "contamination_filter.enabled is true."
     )
-if READ_TYPE != "ont":
-    raise ValueError("Snakefile_generic currently supports hifiasm.read_type: ont.")
+if READ_TYPE not in READ_TYPE_FLAGS:
+    raise ValueError("Snakefile_generic supports hifiasm.read_type: ont or hifi.")
+READ_FLAG = READ_TYPE_FLAGS[READ_TYPE]
 
 
 def mkdirs():
@@ -178,7 +183,7 @@ rule hifiasm_assembly:
         os.path.join(LOG_DIR, "hifiasm.log")
     shell:
         """
-        hifiasm -o {ASSEMBLY_DIR}/{PREFIX} -t {threads} {BASE_ARGS} --ont {input.fastq} {EXTRA_ARGS} > {log} 2>&1
+        hifiasm -o {ASSEMBLY_DIR}/{PREFIX} -t {threads} {BASE_ARGS} {READ_FLAG} {input.fastq} {EXTRA_ARGS} > {log} 2>&1
         touch {output.marker}
         """
 

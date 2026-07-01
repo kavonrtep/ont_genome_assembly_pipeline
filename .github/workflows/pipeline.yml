@@ -1,0 +1,60 @@
+name: pipeline
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: assembly-ci
+          create-args: >-
+            python=3.11
+            snakemake
+            pyyaml
+          condarc: |
+            channels:
+              - conda-forge
+              - bioconda
+            channel_priority: flexible
+          cache-environment: true
+          cache-downloads: true
+
+      - name: Python syntax
+        run: python -m py_compile run_pipeline.py run_mapping.py version.py
+
+      - name: Version parse
+        run: python version.py
+
+      - name: Generic workflow dry-run
+        run: |
+          snakemake \
+            --snakefile Snakefile_generic \
+            --configfile config_generic_template.yaml \
+            --cores 2 \
+            --dry-run
+
+      - name: Bioinformatics HiFi fixture DAG
+        run: |
+          tests/fixtures/fetch_bioinformatics_hifi_fixture.sh
+          snakemake \
+            --snakefile Snakefile_generic \
+            --configfile tests/fixtures/config_bioinformatics_hifi.yaml \
+            --cores 2 \
+            --dry-run

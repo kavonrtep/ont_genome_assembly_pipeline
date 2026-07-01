@@ -1,0 +1,260 @@
+name: release
+
+on:
+  push:
+    tags: ['[0-9]*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build, e.g. 0.1.0'
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GHCR_IMAGE: ghcr.io/kavonrtep/ont_genome_assembly_pipeline/sif
+  APPTAINER_VERSION: 1.3.5
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: assembly-release-check
+          create-args: >-
+            python=3.11
+            snakemake
+            pyyaml
+          condarc: |
+            channels:
+              - conda-forge
+              - bioconda
+            channel_priority: flexible
+          cache-environment: true
+          cache-downloads: true
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Version matches tag
+        run: |
+          tag="${{ steps.tag.outputs.tag }}"
+          version=$(python version.py)
+          if [[ "$tag" != "$version" ]]; then
+            echo "::error::tag '$tag' does not match version.py '$version'"
+            exit 1
+          fi
+
+      - name: Python syntax
+        run: python -m py_compile run_pipeline.py run_mapping.py version.py
+
+      - name: Generic workflow dry-run
+        run: |
+          snakemake \
+            --snakefile Snakefile_generic \
+            --configfile config_generic_template.yaml \
+            --cores 2 \
+            --dry-run
+
+  build-sif:
+    needs: syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      sif: ${{ steps.build.outputs.sif }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo apt-get autoremove -y
+          df -h
+
+      - uses: eWaterCycle/setup-apptainer@v2
+        with:
+          apptainer-version: ${{ env.APPTAINER_VERSION }}
+
+      - name: Build SIF
+        id: build
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          SIF="images/genome_assembly_pipeline_${TAG}.sif"
+          mkdir -p images
+          sudo apptainer build --force "$SIF" Singularity
+          sudo chown "$(id -u):$(id -g)" "$SIF"
+          ls -lh "$SIF"
+          echo "sif=$SIF" >> "$GITHUB_OUTPUT"
+
+      - name: Upload SIF for downstream jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sif
+          path: ${{ steps.build.outputs.sif }}
+          retention-days: 1
+          compression-level: 0
+
+  test-in-container:
+    needs: build-sif
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h
+
+      - uses: eWaterCycle/setup-apptainer@v2
+        with:
+          apptainer-version: ${{ env.APPTAINER_VERSION }}
+
+      - name: Download SIF
+        uses: actions/download-artifact@v4
+        with:
+          name: sif
+          path: images/
+
+      - name: Smoke test runscript
+        run: |
+          SIF=$(ls images/genome_assembly_pipeline_*.sif | head -n1)
+          apptainer run -B "$PWD" "$SIF" --version
+          apptainer run -B "$PWD" "$SIF" --print-config-template generic
+
+      - name: Run Bioinformatics HiFi fixture
+        run: |
+          tests/fixtures/fetch_bioinformatics_hifi_fixture.sh
+          SIF=$(ls images/genome_assembly_pipeline_*.sif | head -n1)
+          apptainer run -B "$PWD" "$SIF" \
+            -w generic \
+            -c tests/fixtures/config_bioinformatics_hifi.yaml \
+            -t 2
+
+      - name: Assert expected fixture outputs
+        run: |
+          test -s tests/fixtures/output_bioinformatics_hifi/assembly/assembly.bp.p_ctg.fasta
+          test -s tests/fixtures/output_bioinformatics_hifi/assembly/assembly.outputs.tsv
+          test -f tests/fixtures/output_bioinformatics_hifi/quast/quast_done.txt
+
+      - name: Upload fixture output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: output_bioinformatics_hifi_${{ github.run_id }}
+          path: tests/fixtures/output_bioinformatics_hifi
+          retention-days: 14
+          if-no-files-found: ignore
+
+  push-ghcr:
+    needs: [build-sif, test-in-container]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: eWaterCycle/setup-apptainer@v2
+        with:
+          apptainer-version: ${{ env.APPTAINER_VERSION }}
+
+      - name: Download SIF
+        uses: actions/download-artifact@v4
+        with:
+          name: sif
+          path: images/
+
+      - name: Login to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GITHUB_TOKEN" | apptainer registry login \
+            --username "${GITHUB_ACTOR}" --password-stdin \
+            oras://ghcr.io
+
+      - name: Push SIF to GHCR
+        run: |
+          TAG="${{ needs.build-sif.outputs.tag }}"
+          SIF=$(ls images/genome_assembly_pipeline_*.sif | head -n1)
+          apptainer push "$SIF" "oras://${GHCR_IMAGE}:${TAG}"
+          apptainer push "$SIF" "oras://${GHCR_IMAGE}:latest"
+
+  create-release:
+    needs: [build-sif, push-ghcr]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+
+      - name: Compose release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.build-sif.outputs.tag }}"
+          AUTO=$(gh api \
+            repos/${{ github.repository }}/releases/generate-notes \
+            -f tag_name="$TAG" -q .body)
+          {
+            echo "## Container image"
+            echo
+            echo "The Singularity / Apptainer image is published to GHCR as an OCI artefact:"
+            echo
+            echo '```bash'
+            echo "apptainer pull oras://${GHCR_IMAGE}:${TAG}"
+            echo "# or: apptainer pull oras://${GHCR_IMAGE}:latest"
+            echo '```'
+            echo
+            echo "Generic workflow example:"
+            echo
+            echo '```bash'
+            echo "apptainer run -B /path/to/data -B \\$PWD genome_assembly_pipeline_${TAG}.sif -w generic -c config_generic.yaml -t 20"
+            echo '```'
+            echo
+            echo "---"
+            echo
+            echo "$AUTO"
+          } > release-notes.md
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.build-sif.outputs.tag }}"
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file release-notes.md \
+            --verify-tag
