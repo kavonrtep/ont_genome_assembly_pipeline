@@ -1,0 +1,26 @@
+reads:
+  ont_fastq: "tests/fixtures/minimal.fastq"
+
+contamination_filter:
+  enabled: false
+
+read_trimming:
+  trim_start: 0
+  trim_end: 0
+
+hifiasm:
+  output_prefix: "assembly"
+  read_type: "ont"
+  base_args: "-W"
+  extra_args: ""
+  mode: "primary"
+
+outputs:
+  output_dir: "tests/fixtures/output_generic_ci"
+  keep_filtered_reads: true
+  keep_intermediate_gfa: true
+
+steps:
+  quast: true
+  map_reads_back: false
+  clipping_analysis: false

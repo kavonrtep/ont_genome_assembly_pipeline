@@ -73,7 +73,7 @@ jobs:
         run: |
           snakemake \
             --snakefile Snakefile_generic \
-            --configfile config_generic_template.yaml \
+            --configfile tests/fixtures/config_generic_ci.yaml \
             --cores 2 \
             --dry-run
 

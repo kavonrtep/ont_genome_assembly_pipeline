@@ -46,15 +46,15 @@ jobs:
         run: |
           snakemake \
             --snakefile Snakefile_generic \
-            --configfile config_generic_template.yaml \
+            --configfile tests/fixtures/config_generic_ci.yaml \
             --cores 2 \
             --dry-run
 
       - name: Bioinformatics HiFi fixture DAG
         run: |
-          tests/fixtures/fetch_bioinformatics_hifi_fixture.sh
           snakemake \
             --snakefile Snakefile_generic \
             --configfile tests/fixtures/config_bioinformatics_hifi.yaml \
+            --config reads='{"ont_fastq":"tests/fixtures/minimal.fastq"}' \
             --cores 2 \
             --dry-run

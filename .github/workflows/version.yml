@@ -66,21 +66,21 @@ jobs:
             echo "No previous main commit; skipping monotonic check."
             exit 0
           fi
-          if ! git show "${prev_sha}:version.py" > /tmp/prev_version.py 2>/dev/null; then
+          if git show "${prev_sha}:version.py" > /tmp/prev_version.py 2>/dev/null; then
+            prev=$(python -c "
+            import importlib.util
+            spec = importlib.util.spec_from_file_location('prev_version', '/tmp/prev_version.py')
+            m = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(m)
+            print(m.__version__)
+            ")
+            echo "previous: $prev   new: $PY_VERSION"
+            python -c "
+            from packaging.version import Version
+            prev, curr = Version('$prev'), Version('$PY_VERSION')
+            assert curr >= prev, f'version went backwards: {prev} -> {curr}'
+            print(f'OK: {prev} <= {curr}')
+            "
+          else
             echo "version.py absent on previous main commit; skipping monotonic check."
-            exit 0
           fi
-          prev=$(python -c "
-          import importlib.util
-          spec = importlib.util.spec_from_file_location('prev_version', '/tmp/prev_version.py')
-          m = importlib.util.module_from_spec(spec)
-          spec.loader.exec_module(m)
-          print(m.__version__)
-          ")
-          echo "previous: $prev   new: $PY_VERSION"
-          python -c "
-          from packaging.version import Version
-          prev, curr = Version('$prev'), Version('$PY_VERSION')
-          assert curr >= prev, f'version went backwards: {prev} -> {curr}'
-          print(f'OK: {prev} <= {curr}')
-          "
