@@ -327,18 +327,13 @@ rule map_nanopore_reads_to_assembly:
     log: os.path.join(OUTPUT_DIR, "logs/map_nanopore_reads_to_assembly.log")
     shell:
         """
-        # dorado is in path
-        echo "lgging test"
-        dorado aligner {input.assembly} {input.fastq_long}  2> {log} 1> {output.bam_long}.unsorted.bam
-        samtools sort -@ {threads} -o {output.bam_long} {output.bam_long}.unsorted.bam
+        minimap2 -a -x lr:hq -t {threads} {input.assembly} {input.fastq_long} 2> {log} | \
+        samtools sort -@ {threads} -o {output.bam_long} -
         samtools index -c {output.bam_long}
-        rm {output.bam_long}.unsorted.bam
-        
-        dorado aligner {input.assembly} {input.filtq_med}  2> {log} 1> {output.bam_med}.unsorted.bam
-        samtools sort -@ {threads} -o {output.bam_med} {output.bam_med}.unsorted.bam
+
+        minimap2 -a -x lr:hq -t {threads} {input.assembly} {input.filtq_med} 2>> {log} | \
+        samtools sort -@ {threads} -o {output.bam_med} -
         samtools index -c {output.bam_med}
-        rm {output.bam_med}.unsorted.bam
-        
         """
 
 

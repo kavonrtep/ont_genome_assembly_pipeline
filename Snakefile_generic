@@ -258,7 +258,7 @@ rule map_reads_back:
         os.path.join(LOG_DIR, "map_reads_back.log")
     shell:
         """
-        dorado aligner {input.assembly} {input.fastq} 2> {log} | \
+        minimap2 -a -x lr:hq -t {threads} {input.assembly} {input.fastq} 2> {log} | \
           samtools sort -@ {threads} -o {output.bam} -
         samtools index -c {output.bam}
         """

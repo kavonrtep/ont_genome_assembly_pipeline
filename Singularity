@@ -68,13 +68,6 @@ From: continuumio/miniconda3@sha256:3a2017213a16daff5bc8dec8571354249c3370d6b0d6
     cd hifiasm && git checkout cf27b25413e01032283f5a030baac5dd3f1a8280 && make
     cp hifiasm /usr/local/bin
 
-    # install dorado
-    cd /opt
-    wget https://cdn.oxfordnanoportal.com/software/analysis/dorado-0.9.1-linux-x64.tar.gz
-    tar -xvf dorado-0.9.1-linux-x64.tar.gz
-    ln -s /opt/dorado-0.9.1-linux-x64/bin/dorado /usr/local/bin/dorado
-    rm dorado-0.9.1-linux-x64.tar.gz
-
     # Stamp image labels from version.py so the release artefact carries
     # the pipeline source version it was built from.
     PIPELINE_VERSION=$(python3 /opt/pipeline/version.py)

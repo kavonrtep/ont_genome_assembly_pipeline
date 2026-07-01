@@ -19,8 +19,7 @@ This pipeline performs genome assembly from Oxford Nanopore reads, contamination
 The container is built from a Singularity definition file that installs:
 - Snakemake (workflow management)
 - Hifiasm (for genome assembly)
-- Dorado (for read mapping)
-- Additional tools including seqkit, BLAST, Quast, samtools, and custom Python/R scripts in the `scripts` folder
+- Additional tools including minimap2, seqkit, BLAST, Quast, samtools, and custom Python/R scripts in the `scripts` folder
 
 
 The following key files are included inside the container:

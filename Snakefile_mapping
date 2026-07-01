@@ -116,7 +116,7 @@ rule convert_hifi_fastq_to_fasta:
         """
 
 ####################################################################
-# 4. Map ONT reads to assembly using dorado
+# 4. Map ONT reads to assembly using minimap2
 ####################################################################
 
 rule map_ont_reads_to_assembly:
@@ -131,8 +131,8 @@ rule map_ont_reads_to_assembly:
     log: "logs/map_ont_reads_to_assembly.log"
     shell:
         """
-        # Map with dorado aligner
-        dorado aligner {input.assembly} {input.fastq} 2> {log} | \
+        # Map with minimap2 (lr:hq preset, equivalent to dorado aligner's default)
+        minimap2 -a -x lr:hq -t {threads} {input.assembly} {input.fastq} 2> {log} | \
         samtools sort -@ {threads} -o {output.bam} -
         
         # Index the BAM file

@@ -4,3 +4,6 @@ __pycache__/
 # Downloaded CI fixture data and generated fixture outputs.
 tests/fixtures/data/
 tests/fixtures/output_*/
+
+# Local dorado install, no longer a pipeline dependency (mapping uses minimap2).
+dorado/
