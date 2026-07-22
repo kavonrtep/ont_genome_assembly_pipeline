@@ -84,6 +84,12 @@ tidecluster:
   # Optional custom tandem-repeat annotation library (TideCluster -l). Leave
   # empty to run detection/clustering without a supplied annotation library.
   library: ""
+  # rDNA (ribosomal) detection is built into TideCluster run_all (its own rRNA
+  # library) and writes tc_rdna.tsv per haplotype, mapping tandem-repeat
+  # clusters (TRC) to rDNA type (5S/45S); locations come from those TRCs in
+  # tc_clustering.gff3. Thresholds below are optional (blank -> TC defaults).
+  rdna_min_coverage: ""
+  rdna_min_identity: ""
 telomere:
   enabled: false
   # Telomeric monomer to search for (tidk). Default is the plant CCCTAAA type.

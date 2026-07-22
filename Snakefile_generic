@@ -99,6 +99,14 @@ QUAST_ENABLED = bool(cfg("quast.enabled", cfg("steps.quast", True)))
 MAP_ENABLED = bool(cfg("map_reads_back.enabled", cfg("steps.map_reads_back", False)))
 TC_ENABLED = bool(cfg("tidecluster.enabled", False))
 TC_LIBRARY = cfg("tidecluster.library", "")
+# rDNA detection is on by default in TideCluster run_all; expose its thresholds
+# (blank -> TideCluster defaults).
+_tc_rdna_args = []
+if cfg("tidecluster.rdna_min_coverage", "") not in ("", None):
+    _tc_rdna_args += ["--rdna_min_coverage", str(cfg("tidecluster.rdna_min_coverage"))]
+if cfg("tidecluster.rdna_min_identity", "") not in ("", None):
+    _tc_rdna_args += ["--rdna_min_identity", str(cfg("tidecluster.rdna_min_identity"))]
+TC_RDNA_ARGS = " ".join(_tc_rdna_args)
 TELO_ENABLED = bool(cfg("telomere.enabled", False))
 TELO_MOTIF = cfg("telomere.motif", "CCCTAAA")
 REFASSIGN_ENABLED = bool(cfg("reference_assignment.enabled", False))
@@ -441,10 +449,16 @@ rule run_tidecluster:
     input:
         fasta=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{{hap}}.fa")
     output:
-        marker=os.path.join(TIDECLUSTER_DIR, "{hap}", "tc_done.txt")
+        marker=os.path.join(TIDECLUSTER_DIR, "{hap}", "tc_done.txt"),
+        # rDNA (ribosomal) locations: run_all writes <prefix>_rdna.tsv by
+        # default using TideCluster's built-in rRNA library. It maps each
+        # tandem-repeat cluster (TRC) to its rDNA type (5S/45S) + coverage;
+        # genomic coordinates come from the TRCs in tc_clustering.gff3.
+        rdna=os.path.join(TIDECLUSTER_DIR, "{hap}", "tc_rdna.tsv")
     params:
         prefix=os.path.join(TIDECLUSTER_DIR, "{hap}", "tc"),
-        library=(f"-l {TC_LIBRARY}" if TC_LIBRARY else "")
+        library=(f"-l {TC_LIBRARY}" if TC_LIBRARY else ""),
+        rdna_args=TC_RDNA_ARGS
     conda:
         "envs/tidecluster.yaml"
     threads: workflow.cores
@@ -453,7 +467,12 @@ rule run_tidecluster:
     shell:
         """
         TideCluster.py run_all -f {input.fasta} -pr {params.prefix} {params.library} \
-          -c {threads} > {log} 2>&1
+          {params.rdna_args} -c {threads} > {log} 2>&1
+        # run_all writes {params.prefix}_rdna.tsv; guarantee the declared output
+        # exists even if the assembly carries no detectable rDNA.
+        if [ ! -f {output.rdna} ]; then
+            printf "TRC\\trDNA_type\\tcoverage\\n" > {output.rdna}
+        fi
         touch {output.marker}
         """
 
