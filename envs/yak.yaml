@@ -1,0 +1,8 @@
+name: yak
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # yak: parental k-mer dumps for hifiasm trio (-1/-2) and per-contig
+  # parental/subgenome classification (yak triobin).
+  - yak

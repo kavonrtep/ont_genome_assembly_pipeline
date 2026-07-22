@@ -82,6 +82,46 @@ def config_get_path(config_object, path, default=None):
     return value
 
 
+def resolve_required_files(workflow_name, config_object):
+    """Return the list of config keys that must point to existing files.
+
+    For the generic workflow this depends on the chosen assembly.mode and which
+    per-haplotype steps are enabled, mirroring the validation in
+    Snakefile_generic. Other workflows use their static required_files list.
+    """
+    workflow = WORKFLOWS[workflow_name]
+    if workflow_name != "generic":
+        return list(workflow["required_files"])
+
+    def gget(key, default=None):
+        return config_get(config_object, key, default)
+
+    read_type = gget("assembly.read_type", gget("hifiasm.read_type", "ont"))
+    reads_key = "reads.hifi_fastq" if read_type == "hifi" else "reads.ont_fastq"
+    required = [reads_key]
+
+    if gget("contamination_filter.enabled", True) is not False:
+        required += ["contamination_filter.plastid_db",
+                     "contamination_filter.mitochondrial_db"]
+
+    mode = gget("assembly.mode", "primary")
+    if mode in ("hic", "triploid_hic"):
+        required += ["reads.hic_r1", "reads.hic_r2"]
+    if mode == "trio":
+        required += ["assembly.trio.paternal_illumina",
+                     "assembly.trio.maternal_illumina"]
+
+    if gget("reference_assignment.enabled", False) or \
+            gget("dotplot_vs_reference.enabled", False):
+        required += ["reference.fasta"]
+
+    if gget("parental_assignment.enabled", False):
+        required += ["parental_assignment.paternal_illumina",
+                     "parental_assignment.maternal_illumina"]
+
+    return required
+
+
 def read_template(workflow_name):
     workflow = WORKFLOWS[workflow_name]
     template_candidates = [workflow["template"], workflow.get("fallback_template")]
@@ -104,10 +144,12 @@ def show_singularity_settings(config_object, workflow_name):
     # Always include the output directory.
     output_dir = config_get_path(config_object, workflow["output_path"], "output")
     dirs.add(os.path.abspath(output_dir))
-    for key in workflow["required_files"]:
-        path = config_get(config_object, key)
-        if path:
-            dirs.add(os.path.dirname(os.path.abspath(path)))
+    for key in resolve_required_files(workflow_name, config_object):
+        value = config_get(config_object, key)
+        for path in str(value).split(",") if value else []:
+            path = path.strip()
+            if path:
+                dirs.add(os.path.dirname(os.path.abspath(path)))
     bind_string = " ".join([f"-B {d}" for d in dirs])
     print("Run Singularity with the following bind options:")
     print(f"singularity run {bind_string} ...")
@@ -184,19 +226,22 @@ def main():
             show_singularity_settings(config_object, workflow_name)
             sys.exit(1)
 
-    # Check that required input files exist.
+    # Check that required input files exist. The required set is resolved from
+    # the workflow and (for generic) the chosen mode / enabled steps. Values may
+    # be comma-separated lists (e.g. paired parental Illumina files).
     missing_files = []
-    for key in workflow["required_files"]:
-        configured_path = config_get(config_object, key)
-        if not configured_path:
-            if workflow_name == "generic" and key.startswith("contamination_filter.") \
-                    and config_get(config_object, "contamination_filter.enabled", True) is False:
-                continue
+    for key in resolve_required_files(workflow_name, config_object):
+        configured_value = config_get(config_object, key)
+        if not configured_value:
             missing_files.append(key)
             continue
-        path = os.path.abspath(configured_path)
-        if not os.path.exists(path):
-            missing_files.append(f"{key} ({path})")
+        for configured_path in str(configured_value).split(","):
+            configured_path = configured_path.strip()
+            if not configured_path:
+                continue
+            path = os.path.abspath(configured_path)
+            if not os.path.exists(path):
+                missing_files.append(f"{key} ({path})")
 
     if missing_files:
         print("Missing or inaccessible required input(s):")

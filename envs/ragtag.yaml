@@ -1,0 +1,8 @@
+name: ragtag
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # RagTag pulls in minimap2; used for reference-based contig assignment,
+  # ordering and orientation (ragtag.py scaffold).
+  - ragtag

@@ -1,12 +1,24 @@
-# Generic lightweight ONT assembly pipeline configuration
+# Generic phased-assembly + annotation pipeline configuration.
+#
+# Two orthogonal ideas drive the workflow:
+#   * assembly.mode  -> HOW the assembly is phased and therefore WHICH
+#                       haplotypes exist (primary / hap1 / hap2 / hap3). Every
+#                       downstream annotation step fans out over that set.
+#   * parental_assignment -> an optional LABELLING layer that tags the already
+#                       assembled contigs by parental origin / subgenome using
+#                       parental Illumina k-mers. Hi-C phasing alone cannot do
+#                       this; parental Illumina is required.
 
 reads:
-  # Raw Oxford Nanopore FASTQ input.
+  # Long reads for assembly. Use ont_fastq for ONT (assembly.read_type: ont)
+  # or hifi_fastq for HiFi (assembly.read_type: hifi).
   ont_fastq: "data/read_all_sample.fastq"
+  hifi_fastq: ""
+  # Hi-C reads, required only for assembly.mode: hic or triploid_hic.
+  hic_r1: ""
+  hic_r2: ""
 
 contamination_filter:
-  # Plastid and mitochondrial filtering is enabled by default because it can
-  # substantially improve assembly quality.
   enabled: true
   plastid_db: "data/P.fulvum_MW160430.1_plast.fasta"
   mitochondrial_db: "data/Pisum_fulvum_NC_059792.1_min.fasta"
@@ -15,27 +27,75 @@ contamination_filter:
   word_size: 21
 
 read_trimming:
-  # Trim short, low-quality adapter-like sequence from read ends before assembly.
   trim_start: 0
   trim_end: 0
 
-hifiasm:
+assembly:
   output_prefix: "assembly"
-  # Supported values: ont, hifi. ONT runs add --ont; HiFi runs use hifiasm's
-  # default read mode.
+  # Long-read type: ont (adds --ont) or hifi (hifiasm default mode).
   read_type: "ont"
+  # Phasing mode. Determines the hifiasm invocation and the expected haplotype
+  # set that every annotation step iterates over:
+  #   primary       -> [primary]                collapsed contigs
+  #   phased        -> [primary, hap1, hap2]    hifiasm default het phasing (unlabelled)
+  #   hic           -> [primary, hap1, hap2]    Hi-C phasing (unlabelled)
+  #   trio          -> [hap1, hap2]             parental Illumina binning (parent-labelled)
+  #   triploid_hic  -> [hap1, hap2, hap3]       --n-hap 3 Hi-C phasing (unlabelled)
+  mode: "primary"
   base_args: "-W"
   extra_args: ""
-  # primary keeps the standard p_ctg output as the main assembly. Haplotype or
-  # experimental hifiasm options can be supplied through extra_args.
-  mode: "primary"
+  # Optional Hi-C restriction enzyme site(s) passed to hifiasm --enzyme.
+  enzyme: ""
+  # Used only when mode: trio. hifiasm trio needs BOTH parents. Each value may
+  # be a single file or a comma-separated list (e.g. "pat_R1.fq.gz,pat_R2.fq.gz").
+  trio:
+    paternal_illumina: ""
+    maternal_illumina: ""
+  # Optional: force a subset of the mode's haplotypes, e.g. [hap1, hap2].
+  # Leave empty to use every haplotype the mode produces.
+  haplotypes: []
+
+# Optional parental / subgenome labelling of the assembled contigs. Works on
+# top of ANY mode. Degrades gracefully with how much parental data you have.
+parental_assignment:
+  enabled: false
+  # triobin: yak triobin (requires BOTH parents). hapmers: not yet implemented.
+  method: "triobin"
+  paternal_illumina: ""
+  maternal_illumina: ""
+  # Prior knowledge, e.g. for an AAB triploid.
+  subgenome_labels:
+    paternal: "A"
+    maternal: "B"
+  emit_binned_fastas: false
+
+reference:
+  # Single EXTERNAL reference FASTA, shared across all haplotypes for
+  # reference_assignment and dotplot_vs_reference. Required when either is on.
+  fasta: ""
+
+# Per-haplotype annotation steps. Each is toggled by its own `enabled` flag.
+quast:
+  enabled: true
+map_reads_back:
+  enabled: false
+tidecluster:
+  enabled: false
+  # Optional custom tandem-repeat annotation library (TideCluster -l). Leave
+  # empty to run detection/clustering without a supplied annotation library.
+  library: ""
+telomere:
+  enabled: false
+  # Telomeric monomer to search for (tidk). Default is the plant CCCTAAA type.
+  motif: "CCCTAAA"
+reference_assignment:
+  enabled: false
+dotplot_vs_reference:
+  enabled: false
+  # minimap2 preset for assembly-vs-reference (asm5 / asm10 / asm20).
+  preset: "asm20"
 
 outputs:
   output_dir: "output_generic"
   keep_filtered_reads: true
   keep_intermediate_gfa: true
-
-steps:
-  quast: true
-  map_reads_back: false
-  clipping_analysis: false

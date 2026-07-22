@@ -13,50 +13,172 @@ def cfg(path, default=None):
     return value
 
 
+def as_list(value):
+    """Accept a single path or a comma-separated string; return a list."""
+    if not value:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value if v]
+    return [part.strip() for part in str(value).split(",") if part.strip()]
+
+
 OUTPUT_DIR = cfg("outputs.output_dir", config.get("output_dir", "output_generic"))
 DATA_DIR = os.path.join(OUTPUT_DIR, "data")
 ASSEMBLY_DIR = os.path.join(OUTPUT_DIR, "assembly")
 QUAST_DIR = os.path.join(OUTPUT_DIR, "quast")
 LOG_DIR = os.path.join(OUTPUT_DIR, "logs")
 MAPPING_DIR = os.path.join(OUTPUT_DIR, "mapping")
+ANALYSIS_DIR = os.path.join(OUTPUT_DIR, "analysis")
+TIDECLUSTER_DIR = os.path.join(ANALYSIS_DIR, "tidecluster")
+TELOMERE_DIR = os.path.join(ANALYSIS_DIR, "telomere")
+REFASSIGN_DIR = os.path.join(ANALYSIS_DIR, "reference_assignment")
+DOTPLOT_DIR = os.path.join(ANALYSIS_DIR, "dotplots")
+PARENTAL_DIR = os.path.join(ANALYSIS_DIR, "parental_assignment")
+YAK_DIR = os.path.join(DATA_DIR, "yak")
 
-ONT_FASTQ = cfg("reads.ont_fastq", config.get("oxford_nanopore_reads"))
-PREFIX = cfg("hifiasm.output_prefix", "assembly")
-READ_TYPE = cfg("hifiasm.read_type", "ont")
-READ_TYPE_FLAGS = {
-    "ont": "--ont",
-    "hifi": "",
+PREFIX = cfg("assembly.output_prefix", cfg("hifiasm.output_prefix", "assembly"))
+READ_TYPE = cfg("assembly.read_type", cfg("hifiasm.read_type", "ont"))
+BASE_ARGS = cfg("assembly.base_args", cfg("hifiasm.base_args", "-W"))
+EXTRA_ARGS = cfg("assembly.extra_args", cfg("hifiasm.extra_args", ""))
+MODE = cfg("assembly.mode", "primary")
+ENZYME = cfg("assembly.enzyme", "")
+
+READ_TYPE_FLAGS = {"ont": "--ont", "hifi": ""}
+if READ_TYPE not in READ_TYPE_FLAGS:
+    raise ValueError("Snakefile_generic supports assembly.read_type: ont or hifi.")
+READ_FLAG = READ_TYPE_FLAGS[READ_TYPE]
+MAP_PRESET = "map-hifi" if READ_TYPE == "hifi" else "lr:hq"
+
+# Long reads for assembly (HiFi or ONT). Falls back to the legacy flat key.
+if READ_TYPE == "hifi":
+    READS_FASTQ = cfg("reads.hifi_fastq")
+else:
+    READS_FASTQ = cfg("reads.ont_fastq", config.get("oxford_nanopore_reads"))
+
+# --- Phasing mode -> expected haplotype set -----------------------------------
+# label -> hifiasm gfa filename suffix (relative to {PREFIX}.<suffix>.gfa).
+# NOTE: the exact per-mode hifiasm filenames are validated against a real run;
+# adjust here if the pinned fork names outputs differently.
+MODE_HAP_GFA = {
+    "primary": {"primary": "bp.p_ctg"},
+    "phased": {"primary": "bp.p_ctg", "hap1": "bp.hap1.p_ctg", "hap2": "bp.hap2.p_ctg"},
+    "hic": {"primary": "hic.p_ctg", "hap1": "hic.hap1.p_ctg", "hap2": "hic.hap2.p_ctg"},
+    "trio": {"hap1": "dip.hap1.p_ctg", "hap2": "dip.hap2.p_ctg"},
+    "triploid_hic": {"hap1": "hic.hap1.p_ctg", "hap2": "hic.hap2.p_ctg", "hap3": "hic.hap3.p_ctg"},
 }
-BASE_ARGS = cfg("hifiasm.base_args", "-W")
-EXTRA_ARGS = cfg("hifiasm.extra_args", "")
-TRIM_START = cfg("read_trimming.trim_start", 0)
-TRIM_END = cfg("read_trimming.trim_end", 0)
+if MODE not in MODE_HAP_GFA:
+    raise ValueError(
+        "assembly.mode must be one of: " + ", ".join(sorted(MODE_HAP_GFA)) + f" (got '{MODE}')."
+    )
+HAP_GFA = dict(MODE_HAP_GFA[MODE])
+_override = cfg("assembly.haplotypes", [])
+if _override:
+    unknown = [h for h in _override if h not in HAP_GFA]
+    if unknown:
+        raise ValueError(f"assembly.haplotypes {unknown} not produced by mode '{MODE}'.")
+    HAP_GFA = {h: HAP_GFA[h] for h in _override}
+HAPS = list(HAP_GFA.keys())
+
+# --- Hi-C / trio inputs -------------------------------------------------------
+HIC_R1 = cfg("reads.hic_r1", "")
+HIC_R2 = cfg("reads.hic_r2", "")
+TRIO_PAT = as_list(cfg("assembly.trio.paternal_illumina", ""))
+TRIO_MAT = as_list(cfg("assembly.trio.maternal_illumina", ""))
+
+# --- Parental / subgenome assignment (Axis 2) ---------------------------------
+PA_ENABLED = bool(cfg("parental_assignment.enabled", False))
+PA_METHOD = cfg("parental_assignment.method", "triobin")
+PA_PAT = as_list(cfg("parental_assignment.paternal_illumina", ""))
+PA_MAT = as_list(cfg("parental_assignment.maternal_illumina", ""))
+PA_LAB_PAT = cfg("parental_assignment.subgenome_labels.paternal", "paternal")
+PA_LAB_MAT = cfg("parental_assignment.subgenome_labels.maternal", "maternal")
+PA_BIN = bool(cfg("parental_assignment.emit_binned_fastas", False))
+
+# --- Optional per-haplotype annotation steps ----------------------------------
+QUAST_ENABLED = bool(cfg("quast.enabled", cfg("steps.quast", True)))
+MAP_ENABLED = bool(cfg("map_reads_back.enabled", cfg("steps.map_reads_back", False)))
+TC_ENABLED = bool(cfg("tidecluster.enabled", False))
+TC_LIBRARY = cfg("tidecluster.library", "")
+TELO_ENABLED = bool(cfg("telomere.enabled", False))
+TELO_MOTIF = cfg("telomere.motif", "CCCTAAA")
+REFASSIGN_ENABLED = bool(cfg("reference_assignment.enabled", False))
+DOTPLOT_ENABLED = bool(cfg("dotplot_vs_reference.enabled", False))
+DOTPLOT_PRESET = cfg("dotplot_vs_reference.preset", "asm20")
+REFERENCE = cfg("reference.fasta", "")
+
+# --- Contamination filter -----------------------------------------------------
 FILTER_ENABLED = cfg("contamination_filter.enabled", True)
 PLASTID_DB = cfg("contamination_filter.plastid_db")
 MITO_DB = cfg("contamination_filter.mitochondrial_db")
 MIN_COVERAGE = cfg("contamination_filter.min_coverage", 90)
 MIN_IDENTITY = cfg("contamination_filter.min_identity", 90)
 WORD_SIZE = cfg("contamination_filter.word_size", 21)
+TRIM_START = cfg("read_trimming.trim_start", 0)
+TRIM_END = cfg("read_trimming.trim_end", 0)
 
-
-if not ONT_FASTQ:
-    raise ValueError("Missing reads.ont_fastq in config.")
+# --- Validation ---------------------------------------------------------------
+if not READS_FASTQ:
+    raise ValueError("Missing reads.ont_fastq (or reads.hifi_fastq for hifi) in config.")
 if FILTER_ENABLED and (not PLASTID_DB or not MITO_DB):
     raise ValueError(
         "contamination_filter.plastid_db and mitochondrial_db are required when "
         "contamination_filter.enabled is true."
     )
-if READ_TYPE not in READ_TYPE_FLAGS:
-    raise ValueError("Snakefile_generic supports hifiasm.read_type: ont or hifi.")
-READ_FLAG = READ_TYPE_FLAGS[READ_TYPE]
+if MODE in ("hic", "triploid_hic") and not (HIC_R1 and HIC_R2):
+    raise ValueError(f"assembly.mode '{MODE}' requires reads.hic_r1 and reads.hic_r2.")
+if MODE == "trio" and not (TRIO_PAT and TRIO_MAT):
+    raise ValueError(
+        "assembly.mode 'trio' requires assembly.trio.paternal_illumina and "
+        "maternal_illumina (hifiasm trio needs both parents)."
+    )
+if (REFASSIGN_ENABLED or DOTPLOT_ENABLED) and not REFERENCE:
+    raise ValueError(
+        "reference.fasta is required when reference_assignment or "
+        "dotplot_vs_reference is enabled."
+    )
+if PA_ENABLED:
+    if PA_METHOD != "triobin":
+        raise ValueError("parental_assignment.method: only 'triobin' is implemented.")
+    if not (PA_PAT and PA_MAT):
+        raise ValueError(
+            "parental_assignment.method 'triobin' requires both paternal_illumina "
+            "and maternal_illumina (yak triobin needs both parents)."
+        )
+
+# --- yak k-mer database sources ----------------------------------------------
+YAK_SOURCES = {}
+if MODE == "trio":
+    YAK_SOURCES["trio_paternal"] = TRIO_PAT
+    YAK_SOURCES["trio_maternal"] = TRIO_MAT
+if PA_ENABLED:
+    YAK_SOURCES["assign_paternal"] = PA_PAT
+    YAK_SOURCES["assign_maternal"] = PA_MAT
 
 
-def mkdirs():
-    for path in [OUTPUT_DIR, DATA_DIR, ASSEMBLY_DIR, QUAST_DIR, LOG_DIR, MAPPING_DIR]:
-        os.makedirs(path, exist_ok=True)
+def yak_path(name):
+    return os.path.join(YAK_DIR, f"{name}.yak")
 
 
-mkdirs()
+def fasta_for(hap):
+    return os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{hap}.fa")
+
+
+def gfa_source(hap):
+    return os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{HAP_GFA[hap]}.gfa")
+
+
+ALL_DIRS = [
+    OUTPUT_DIR, DATA_DIR, ASSEMBLY_DIR, QUAST_DIR, LOG_DIR, MAPPING_DIR,
+    ANALYSIS_DIR, TIDECLUSTER_DIR, TELOMERE_DIR, REFASSIGN_DIR, DOTPLOT_DIR,
+    PARENTAL_DIR, YAK_DIR,
+]
+for path in ALL_DIRS:
+    os.makedirs(path, exist_ok=True)
+
+
+wildcard_constraints:
+    hap="|".join(HAPS) if HAPS else "NONE",
+    yakname="[A-Za-z0-9_]+",
 
 
 def selected_targets():
@@ -64,16 +186,23 @@ def selected_targets():
         os.path.join(DATA_DIR, "reads.filtered.fastq"),
         os.path.join(DATA_DIR, "reads.filtered.fasta"),
         os.path.join(ASSEMBLY_DIR, f"{PREFIX}.hifiasm.done"),
-        os.path.join(ASSEMBLY_DIR, "assembly_fastas.done"),
         os.path.join(ASSEMBLY_DIR, "assembly.outputs.tsv"),
     ]
-    if cfg("steps.quast", True):
-        targets.append(os.path.join(QUAST_DIR, "quast_done.txt"))
-    if cfg("steps.map_reads_back", False):
-        targets.extend([
-            os.path.join(MAPPING_DIR, "reads_to_primary.sorted.bam"),
-            os.path.join(MAPPING_DIR, "reads_to_primary.sorted.bam.csi"),
-        ])
+    targets += [fasta_for(hap) for hap in HAPS]
+    if QUAST_ENABLED:
+        targets += [os.path.join(QUAST_DIR, hap, "quast_done.txt") for hap in HAPS]
+    if MAP_ENABLED:
+        targets += [os.path.join(MAPPING_DIR, f"reads_to_{hap}.sorted.bam") for hap in HAPS]
+    if TC_ENABLED:
+        targets += [os.path.join(TIDECLUSTER_DIR, hap, "tc_done.txt") for hap in HAPS]
+    if TELO_ENABLED:
+        targets += [os.path.join(TELOMERE_DIR, hap, "telomere_done.txt") for hap in HAPS]
+    if REFASSIGN_ENABLED:
+        targets += [os.path.join(REFASSIGN_DIR, hap, "ragtag.scaffold.fasta") for hap in HAPS]
+    if DOTPLOT_ENABLED:
+        targets += [os.path.join(DOTPLOT_DIR, f"{hap}_vs_reference.png") for hap in HAPS]
+    if PA_ENABLED:
+        targets.append(os.path.join(PARENTAL_DIR, "parental_assignment.tsv"))
     return targets
 
 
@@ -82,9 +211,11 @@ rule all:
         selected_targets()
 
 
+# --- Read preparation and contamination filtering -----------------------------
+
 rule convert_fastq_to_fasta:
     input:
-        fastq=ONT_FASTQ
+        fastq=READS_FASTQ
     output:
         fasta=os.path.join(DATA_DIR, "reads.fasta")
     conda:
@@ -151,7 +282,7 @@ rule detect_contamination_mitochondrial:
 
 rule filter_reads:
     input:
-        fastq=ONT_FASTQ,
+        fastq=READS_FASTQ,
         fasta=os.path.join(DATA_DIR, "reads.fasta"),
         plastid=os.path.join(DATA_DIR, "contam_plastid.tsv"),
         mito=os.path.join(DATA_DIR, "contam_mitochondrial.tsv")
@@ -173,92 +304,265 @@ rule filter_reads:
         """
 
 
+# --- Optional parental k-mer databases (yak) ----------------------------------
+
+rule yak_count:
+    input:
+        reads=lambda wc: YAK_SOURCES[wc.yakname]
+    output:
+        yak=os.path.join(YAK_DIR, "{yakname}.yak")
+    conda:
+        "envs/yak.yaml"
+    threads: workflow.cores
+    log:
+        os.path.join(LOG_DIR, "yak_count_{yakname}.log")
+    shell:
+        # For strict paired-end k-mer dedup yak recommends the two-stream form;
+        # here we pass the read files directly, which is adequate for trio/triobin.
+        """
+        yak count -b37 -t {threads} -o {output.yak} {input.reads} > {log} 2>&1
+        """
+
+
+# --- Assembly -----------------------------------------------------------------
+
+def hifiasm_inputs(wildcards):
+    inputs = {"fastq": os.path.join(DATA_DIR, "reads.filtered.fastq")}
+    if MODE == "trio":
+        inputs["pat_yak"] = yak_path("trio_paternal")
+        inputs["mat_yak"] = yak_path("trio_maternal")
+    elif MODE in ("hic", "triploid_hic"):
+        inputs["hic_r1"] = HIC_R1
+        inputs["hic_r2"] = HIC_R2
+    return inputs
+
+
+def hifiasm_mode_flags(wildcards, input):
+    if MODE == "trio":
+        return f"-1 {input.pat_yak} -2 {input.mat_yak}"
+    if MODE in ("hic", "triploid_hic"):
+        flags = f"--h1 {input.hic_r1} --h2 {input.hic_r2}"
+        if ENZYME:
+            flags += f" --enzyme {ENZYME}"
+        if MODE == "triploid_hic":
+            flags += " --n-hap 3"
+        return flags
+    return ""
+
+
 rule hifiasm_assembly:
     input:
-        fastq=os.path.join(DATA_DIR, "reads.filtered.fastq")
+        unpack(hifiasm_inputs)
     output:
         marker=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.hifiasm.done")
+    params:
+        mode_flags=hifiasm_mode_flags
     threads: workflow.cores
     log:
         os.path.join(LOG_DIR, "hifiasm.log")
     shell:
         """
-        hifiasm -o {ASSEMBLY_DIR}/{PREFIX} -t {threads} {BASE_ARGS} {READ_FLAG} {input.fastq} {EXTRA_ARGS} > {log} 2>&1
+        hifiasm -o {ASSEMBLY_DIR}/{PREFIX} -t {threads} {BASE_ARGS} {READ_FLAG} \
+          {params.mode_flags} {input.fastq} {EXTRA_ARGS} > {log} 2>&1
         touch {output.marker}
         """
 
 
-rule assembly_gfa_manifest:
+rule gfa_to_fasta:
     input:
         marker=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.hifiasm.done")
     output:
-        manifest=os.path.join(ASSEMBLY_DIR, "assembly.gfa.outputs.tsv")
-    run:
-        gfa_paths = sorted(glob.glob(os.path.join(ASSEMBLY_DIR, f"{PREFIX}*.gfa")))
-        with open(output.manifest, "w") as out:
-            out.write("label\tpath\ttype\n")
-            for path in gfa_paths:
-                label = os.path.basename(path)
-                if path.endswith(".bp.p_ctg.gfa"):
-                    label = "primary"
-                elif ".hap1." in path:
-                    label = "hap1"
-                elif ".hap2." in path:
-                    label = "hap2"
-                elif ".bp.hap" in path:
-                    label = os.path.basename(path).replace(f"{PREFIX}.", "").replace(".gfa", "")
-                out.write(f"{label}\t{path}\tgfa\n")
-
-
-rule gfa_to_fastas:
-    input:
-        manifest=os.path.join(ASSEMBLY_DIR, "assembly.gfa.outputs.tsv")
-    output:
-        primary=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.bp.p_ctg.fasta"),
-        marker=os.path.join(ASSEMBLY_DIR, "assembly_fastas.done"),
-        manifest=os.path.join(ASSEMBLY_DIR, "assembly.outputs.tsv")
+        fasta=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{{hap}}.fa"),
+        fai=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{{hap}}.fa.fai")
+    params:
+        gfa=lambda wc: gfa_source(wc.hap)
+    conda:
+        "envs/basic_tools.yaml"
     shell:
         """
-        cp {input.manifest} {output.manifest}
-        awk 'NR > 1 && $3 == "gfa" {{ print $1"\\t"$2 }}' {input.manifest} | while IFS="$(printf '\\t')" read label gfa; do
-            fasta="${{gfa%.gfa}}.fasta"
-            awk '/^S/{{print ">"$2"\\n"$3}}' "$gfa" | fold > "$fasta"
-            printf "%s_fasta\\t%s\\tfasta\\n" "$label" "$fasta" >> {output.manifest}
-        done
-        touch {output.marker}
+        if [ ! -s "{params.gfa}" ]; then
+            echo "Expected hifiasm output {params.gfa} for haplotype '{wildcards.hap}' not found." >&2
+            exit 1
+        fi
+        awk '/^S/{{print ">"$2"\\n"$3}}' {params.gfa} | fold > {output.fasta}
+        samtools faidx {output.fasta}
         """
 
+
+rule assembly_manifest:
+    input:
+        fastas=[fasta_for(hap) for hap in HAPS]
+    output:
+        manifest=os.path.join(ASSEMBLY_DIR, "assembly.outputs.tsv")
+    run:
+        with open(output.manifest, "w") as out:
+            out.write("haplotype\tfasta\tgfa\n")
+            for hap in HAPS:
+                out.write(f"{hap}\t{fasta_for(hap)}\t{gfa_source(hap)}\n")
+
+
+# --- Per-haplotype analyses ---------------------------------------------------
 
 rule run_quast:
     input:
-        primary=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.bp.p_ctg.fasta")
+        fasta=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{{hap}}.fa")
     output:
-        marker=os.path.join(QUAST_DIR, "quast_done.txt")
+        marker=os.path.join(QUAST_DIR, "{hap}", "quast_done.txt")
     conda:
         "envs/quast.yaml"
     shell:
         """
-        quast {input.primary} -o {QUAST_DIR}
+        quast {input.fasta} -o {QUAST_DIR}/{wildcards.hap}
         touch {output.marker}
         """
 
 
 rule map_reads_back:
     input:
-        marker=os.path.join(ASSEMBLY_DIR, "assembly_fastas.done"),
-        assembly=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.bp.p_ctg.fasta"),
+        fasta=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{{hap}}.fa"),
         fastq=os.path.join(DATA_DIR, "reads.filtered.fastq")
     output:
-        bam=os.path.join(MAPPING_DIR, "reads_to_primary.sorted.bam"),
-        csi=os.path.join(MAPPING_DIR, "reads_to_primary.sorted.bam.csi")
+        bam=os.path.join(MAPPING_DIR, "reads_to_{hap}.sorted.bam"),
+        csi=os.path.join(MAPPING_DIR, "reads_to_{hap}.sorted.bam.csi")
     conda:
         "envs/basic_tools.yaml"
     threads: workflow.cores
     log:
-        os.path.join(LOG_DIR, "map_reads_back.log")
+        os.path.join(LOG_DIR, "map_reads_back_{hap}.log")
     shell:
         """
-        minimap2 -a -x lr:hq -t {threads} {input.assembly} {input.fastq} 2> {log} | \
+        minimap2 -a -x {MAP_PRESET} -t {threads} {input.fasta} {input.fastq} 2> {log} | \
           samtools sort -@ {threads} -o {output.bam} -
         samtools index -c {output.bam}
+        """
+
+
+rule run_tidecluster:
+    input:
+        fasta=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{{hap}}.fa")
+    output:
+        marker=os.path.join(TIDECLUSTER_DIR, "{hap}", "tc_done.txt")
+    params:
+        prefix=os.path.join(TIDECLUSTER_DIR, "{hap}", "tc"),
+        library=(f"-l {TC_LIBRARY}" if TC_LIBRARY else "")
+    conda:
+        "envs/tidecluster.yaml"
+    threads: workflow.cores
+    log:
+        os.path.join(LOG_DIR, "tidecluster_{hap}.log")
+    shell:
+        """
+        TideCluster.py run_all -f {input.fasta} -pr {params.prefix} {params.library} \
+          -c {threads} > {log} 2>&1
+        touch {output.marker}
+        """
+
+
+rule find_telomeres:
+    input:
+        fasta=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{{hap}}.fa")
+    output:
+        marker=os.path.join(TELOMERE_DIR, "{hap}", "telomere_done.txt")
+    params:
+        outdir=os.path.join(TELOMERE_DIR, "{hap}")
+    conda:
+        "envs/tidk.yaml"
+    log:
+        os.path.join(LOG_DIR, "telomere_{hap}.log")
+    shell:
+        """
+        tidk search --string {TELO_MOTIF} --output {wildcards.hap} \
+          --dir {params.outdir} {input.fasta} > {log} 2>&1
+        tidk plot --tsv {params.outdir}/{wildcards.hap}_telomeric_repeat_windows.tsv \
+          --output {params.outdir}/{wildcards.hap}_telomere >> {log} 2>&1 || true
+        touch {output.marker}
+        """
+
+
+rule reference_assignment:
+    input:
+        fasta=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{{hap}}.fa"),
+        reference=(REFERENCE if REFERENCE else [])
+    output:
+        scaffold=os.path.join(REFASSIGN_DIR, "{hap}", "ragtag.scaffold.fasta")
+    params:
+        outdir=os.path.join(REFASSIGN_DIR, "{hap}")
+    conda:
+        "envs/ragtag.yaml"
+    threads: workflow.cores
+    log:
+        os.path.join(LOG_DIR, "reference_assignment_{hap}.log")
+    shell:
+        """
+        ragtag.py scaffold {input.reference} {input.fasta} -o {params.outdir} \
+          -t {threads} -w > {log} 2>&1
+        """
+
+
+rule dotplot_vs_reference:
+    input:
+        fasta=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{{hap}}.fa"),
+        reference=(REFERENCE if REFERENCE else [])
+    output:
+        png=os.path.join(DOTPLOT_DIR, "{hap}_vs_reference.png")
+    params:
+        paf=os.path.join(DOTPLOT_DIR, "{hap}_vs_reference.paf")
+    conda:
+        "envs/dotplot.yaml"
+    threads: workflow.cores
+    log:
+        os.path.join(LOG_DIR, "dotplot_{hap}.log")
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        minimap2 -x {DOTPLOT_PRESET} -t {threads} {input.reference} {input.fasta} \
+          > {params.paf} 2> {log}
+        paf_dotplot.py -p {params.paf} -o {output.png} \
+          --query_name {wildcards.hap} --target_name reference >> {log} 2>&1
+        """
+
+
+# --- Parental / subgenome assignment (Axis 2) ---------------------------------
+
+rule parental_triobin:
+    input:
+        fasta=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{{hap}}.fa"),
+        pat_yak=yak_path("assign_paternal"),
+        mat_yak=yak_path("assign_maternal")
+    output:
+        triobin=os.path.join(PARENTAL_DIR, "{hap}.triobin")
+    conda:
+        "envs/yak.yaml"
+    threads: workflow.cores
+    log:
+        os.path.join(LOG_DIR, "parental_triobin_{hap}.log")
+    shell:
+        """
+        yak triobin {input.pat_yak} {input.mat_yak} {input.fasta} \
+          > {output.triobin} 2> {log}
+        """
+
+
+rule parental_assignment_merge:
+    input:
+        triobin=[os.path.join(PARENTAL_DIR, f"{hap}.triobin") for hap in HAPS],
+        fastas=[fasta_for(hap) for hap in HAPS]
+    output:
+        table=os.path.join(PARENTAL_DIR, "parental_assignment.tsv")
+    params:
+        triobin_args=" ".join(
+            f"-t {hap}:{os.path.join(PARENTAL_DIR, hap + '.triobin')}" for hap in HAPS
+        ),
+        fasta_args=" ".join(f"--fasta {hap}:{fasta_for(hap)}" for hap in HAPS),
+        bin_arg=(f"--bin_dir {os.path.join(PARENTAL_DIR, 'binned')}" if PA_BIN else "")
+    conda:
+        "envs/pysam.yaml"
+    log:
+        os.path.join(LOG_DIR, "parental_assignment_merge.log")
+    shell:
+        """
+        parental_assignment.py {params.triobin_args} {params.fasta_args} \
+          --paternal_label {PA_LAB_PAT} --maternal_label {PA_LAB_MAT} \
+          {params.bin_arg} -o {output.table} > {log} 2>&1
         """

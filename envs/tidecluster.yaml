@@ -4,4 +4,4 @@ channels:
   - bioconda
   - petrnovak
 dependencies:
-  - tidecluster=1.6
+  - tidecluster=1.17.0
