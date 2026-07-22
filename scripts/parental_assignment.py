@@ -66,8 +66,9 @@ def main():
                         help="Subgenome label for maternal contigs (default: maternal)")
     parser.add_argument("--name_col", type=int, default=0,
                         help="0-based column holding the contig name (default: 0)")
-    parser.add_argument("--class_col", type=int, default=-1,
-                        help="0-based column holding the class token (default: -1, last)")
+    parser.add_argument("--class_col", type=int, default=1,
+                        help="0-based column holding the class token. yak triobin emits "
+                             "'<name> <type> <counts...>', so the type is column 1 (default).")
     parser.add_argument("--fasta", action="append", default=[], metavar="HAP:FILE",
                         help="Haplotype label and its FASTA, e.g. hap1:hap1.fa. Required "
                              "with --bin_dir to write per-subgenome FASTAs. Repeatable.")
