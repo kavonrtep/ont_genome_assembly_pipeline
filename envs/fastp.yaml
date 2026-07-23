@@ -1,0 +1,7 @@
+name: fastp
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # Quality/adapter trimming of parental Illumina reads before yak counting.
+  - fastp

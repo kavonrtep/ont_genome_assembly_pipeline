@@ -30,6 +30,15 @@ read_trimming:
   trim_start: 0
   trim_end: 0
 
+# fastp quality/adapter trimming applied to ALL parental Illumina reads (trio
+# assembly and parental_assignment) before yak k-mer counting. Adapter
+# detection uses fastp's defaults; use extra_args for anything more.
+illumina_qc:
+  enabled: true
+  min_quality: 20
+  min_length: 50
+  extra_args: ""
+
 assembly:
   output_prefix: "assembly"
   # Long-read type: ont (adds --ont) or hifi (hifiasm default mode).

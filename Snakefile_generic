@@ -35,6 +35,7 @@ REFASSIGN_DIR = os.path.join(ANALYSIS_DIR, "reference_assignment")
 DOTPLOT_DIR = os.path.join(ANALYSIS_DIR, "dotplots")
 PARENTAL_DIR = os.path.join(ANALYSIS_DIR, "parental_assignment")
 YAK_DIR = os.path.join(DATA_DIR, "yak")
+QC_DIR = os.path.join(DATA_DIR, "qc")
 
 PREFIX = cfg("assembly.output_prefix", cfg("hifiasm.output_prefix", "assembly"))
 READ_TYPE = cfg("assembly.read_type", cfg("hifiasm.read_type", "ont"))
@@ -128,6 +129,12 @@ WORD_SIZE = cfg("contamination_filter.word_size", 21)
 TRIM_START = cfg("read_trimming.trim_start", 0)
 TRIM_END = cfg("read_trimming.trim_end", 0)
 
+# --- Illumina QC (fastp) for parental reads before yak counting ---------------
+QC_ENABLED = bool(cfg("illumina_qc.enabled", True))
+QC_MIN_QUALITY = cfg("illumina_qc.min_quality", 20)
+QC_MIN_LENGTH = cfg("illumina_qc.min_length", 50)
+QC_EXTRA_ARGS = cfg("illumina_qc.extra_args", "")
+
 # --- Validation ---------------------------------------------------------------
 if not READS_FASTQ:
     raise ValueError("Missing reads.ont_fastq (or reads.hifi_fastq for hifi) in config.")
@@ -171,6 +178,17 @@ def yak_path(name):
     return os.path.join(YAK_DIR, f"{name}.yak")
 
 
+def qc_output(name):
+    return os.path.join(QC_DIR, f"{name}.qc.fastq.gz")
+
+
+def yak_count_reads(wildcards):
+    """Reads fed to yak count: fastp-QC'd output when enabled, else raw."""
+    if QC_ENABLED:
+        return qc_output(wildcards.yakname)
+    return YAK_SOURCES[wildcards.yakname]
+
+
 def fasta_for(hap):
     return os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{hap}.fa")
 
@@ -182,7 +200,7 @@ def gfa_source(hap):
 ALL_DIRS = [
     OUTPUT_DIR, DATA_DIR, ASSEMBLY_DIR, QUAST_DIR, LOG_DIR, MAPPING_DIR,
     ANALYSIS_DIR, TIDECLUSTER_DIR, TELOMERE_DIR, REFASSIGN_DIR, DOTPLOT_DIR,
-    PARENTAL_DIR, YAK_DIR,
+    PARENTAL_DIR, YAK_DIR, QC_DIR,
 ]
 for path in ALL_DIRS:
     os.makedirs(path, exist_ok=True)
@@ -332,11 +350,47 @@ rule filter_reads:
         """
 
 
-# --- Optional parental k-mer databases (yak) ----------------------------------
+# --- Illumina QC + parental k-mer databases (yak) -----------------------------
+
+rule fastp_qc:
+    # Quality-trim and adapter-clip parental Illumina before k-mer counting so
+    # that low-quality tails / adapters do not inject spurious k-mers into the
+    # trio and parental-assignment yak databases. One normalized FASTQ per
+    # source (paired reads are trimmed then concatenated -- yak only needs the
+    # k-mers, not the pairing).
+    input:
+        reads=lambda wc: YAK_SOURCES[wc.yakname]
+    output:
+        qc=os.path.join(QC_DIR, "{yakname}.qc.fastq.gz"),
+        json=os.path.join(QC_DIR, "{yakname}.fastp.json"),
+        html=os.path.join(QC_DIR, "{yakname}.fastp.html")
+    conda:
+        "envs/fastp.yaml"
+    threads: workflow.cores
+    log:
+        os.path.join(LOG_DIR, "fastp_qc_{yakname}.log")
+    shell:
+        """
+        reads=({input.reads})
+        if [ ${{#reads[@]}} -eq 2 ]; then
+            r1={QC_DIR}/{wildcards.yakname}.R1.qc.fastq.gz
+            r2={QC_DIR}/{wildcards.yakname}.R2.qc.fastq.gz
+            fastp -i ${{reads[0]}} -I ${{reads[1]}} -o $r1 -O $r2 \
+              -q {QC_MIN_QUALITY} -l {QC_MIN_LENGTH} -w {threads} \
+              -j {output.json} -h {output.html} {QC_EXTRA_ARGS} > {log} 2>&1
+            cat $r1 $r2 > {output.qc}
+            rm -f $r1 $r2
+        else
+            fastp -i ${{reads[0]}} -o {output.qc} \
+              -q {QC_MIN_QUALITY} -l {QC_MIN_LENGTH} -w {threads} \
+              -j {output.json} -h {output.html} {QC_EXTRA_ARGS} > {log} 2>&1
+        fi
+        """
+
 
 rule yak_count:
     input:
-        reads=lambda wc: YAK_SOURCES[wc.yakname]
+        reads=yak_count_reads
     output:
         yak=os.path.join(YAK_DIR, "{yakname}.yak")
     conda:
