@@ -159,17 +159,21 @@ jobs:
 
       - name: Assert all conda envs are baked into the image
         run: |
-          # Every envs/*.yaml must already exist in the read-only image; if any
-          # is missing, snakemake would try to create it at runtime and hit a
-          # read-only filesystem (as happens for trio/annotation runs that use
-          # fastp/yak/tidk/ragtag/dotplot, which the primary-mode fixture never
-          # exercises). --conda-create-envs-only is a no-op when all are present.
+          # Every envs/*.yaml must already exist in the read-only image; a missing
+          # one would be created at runtime and fail on the read-only filesystem
+          # (as trio/annotation runs using fastp/yak/tidk/ragtag/dotplot did).
+          # Point HOME/XDG_CACHE_HOME at writable paths -- the runscript normally
+          # does this, so a bare `apptainer exec snakemake` otherwise dies writing
+          # its source cache to the read-only /root/.cache. Only an actual
+          # "Creating conda environment" line means an env is missing.
           SIF=$(ls images/genome_assembly_pipeline_*.sif | head -n1)
-          out=$(apptainer exec -B "$PWD" "$SIF" \
-            snakemake -s /opt/pipeline/Snakefile_build_envs --use-conda \
+          mkdir -p .envcheck/cache
+          out=$(apptainer exec -B "$PWD" \
+            --env HOME="$PWD/.envcheck" --env XDG_CACHE_HOME="$PWD/.envcheck/cache" \
+            "$SIF" snakemake -s /opt/pipeline/Snakefile_build_envs --use-conda \
               --conda-prefix /opt/conda/envs --conda-create-envs-only --cores 2 2>&1 || true)
-          echo "$out" | tail -30
-          if echo "$out" | grep -qiE "Creating conda environment|Read-only file system"; then
+          echo "$out" | tail -40
+          if echo "$out" | grep -qi "Creating conda environment"; then
             echo "::error::one or more conda envs are missing from the image (would be built at runtime)"
             exit 1
           fi
