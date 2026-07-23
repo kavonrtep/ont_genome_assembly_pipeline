@@ -1,7 +1,7 @@
 """Single source of truth for the genome assembly pipeline version."""
 
-__version__ = "0.2.0"
-__version_info__ = (0, 2, 0, None)
+__version__ = "0.2.1"
+__version_info__ = (0, 2, 1, None)
 
 
 def parse_version(s):
