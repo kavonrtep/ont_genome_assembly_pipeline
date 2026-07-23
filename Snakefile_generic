@@ -77,7 +77,11 @@ if _override:
     if unknown:
         raise ValueError(f"assembly.haplotypes {unknown} not produced by mode '{MODE}'.")
     HAP_GFA = {h: HAP_GFA[h] for h in _override}
-HAPS = list(HAP_GFA.keys())
+# Candidate haplotype labels for this mode. Which ones are actually REALIZED is
+# decided after assembly by the discover_haplotypes checkpoint (hifiasm may emit
+# fewer, e.g. only the primary for a homozygous genome), so downstream steps fan
+# out over the realized set, not this candidate list.
+CANDIDATE_HAPS = list(HAP_GFA.keys())
 
 # --- Hi-C / trio inputs -------------------------------------------------------
 HIC_R1 = cfg("reads.hic_r1", "")
@@ -185,30 +189,46 @@ for path in ALL_DIRS:
 
 
 wildcard_constraints:
-    hap="|".join(HAPS) if HAPS else "NONE",
+    hap="|".join(CANDIDATE_HAPS) if CANDIDATE_HAPS else "NONE",
     yakname="[A-Za-z0-9_]+",
 
 
-def selected_targets():
+def realized_haplotypes():
+    """Haplotype labels hifiasm actually produced, read from the
+    discover_haplotypes checkpoint. Calling this forces the checkpoint to run
+    first, so it must only be used inside input/param functions or other rules'
+    input functions (never at module top level)."""
+    manifest = checkpoints.discover_haplotypes.get().output.manifest
+    haps = []
+    with open(manifest) as handle:
+        handle.readline()  # header
+        for line in handle:
+            line = line.strip()
+            if line:
+                haps.append(line.split("\t")[0])
+    return haps
+
+
+def all_targets(wildcards):
+    haps = realized_haplotypes()
     targets = [
         os.path.join(DATA_DIR, "reads.filtered.fastq"),
         os.path.join(DATA_DIR, "reads.filtered.fasta"),
-        os.path.join(ASSEMBLY_DIR, f"{PREFIX}.hifiasm.done"),
         os.path.join(ASSEMBLY_DIR, "assembly.outputs.tsv"),
     ]
-    targets += [fasta_for(hap) for hap in HAPS]
+    targets += [fasta_for(hap) for hap in haps]
     if QUAST_ENABLED:
-        targets += [os.path.join(QUAST_DIR, hap, "quast_done.txt") for hap in HAPS]
+        targets += [os.path.join(QUAST_DIR, hap, "quast_done.txt") for hap in haps]
     if MAP_ENABLED:
-        targets += [os.path.join(MAPPING_DIR, f"reads_to_{hap}.sorted.bam") for hap in HAPS]
+        targets += [os.path.join(MAPPING_DIR, f"reads_to_{hap}.sorted.bam") for hap in haps]
     if TC_ENABLED:
-        targets += [os.path.join(TIDECLUSTER_DIR, hap, "tc_done.txt") for hap in HAPS]
+        targets += [os.path.join(TIDECLUSTER_DIR, hap, "tc_done.txt") for hap in haps]
     if TELO_ENABLED:
-        targets += [os.path.join(TELOMERE_DIR, hap, "telomere_done.txt") for hap in HAPS]
+        targets += [os.path.join(TELOMERE_DIR, hap, "telomere_done.txt") for hap in haps]
     if REFASSIGN_ENABLED:
-        targets += [os.path.join(REFASSIGN_DIR, hap, "ragtag.scaffold.fasta") for hap in HAPS]
+        targets += [os.path.join(REFASSIGN_DIR, hap, "ragtag.scaffold.fasta") for hap in haps]
     if DOTPLOT_ENABLED:
-        targets += [os.path.join(DOTPLOT_DIR, f"{hap}_vs_reference.png") for hap in HAPS]
+        targets += [os.path.join(DOTPLOT_DIR, f"{hap}_vs_reference.png") for hap in haps]
     if PA_ENABLED:
         targets.append(os.path.join(PARENTAL_DIR, "parental_assignment.tsv"))
     return targets
@@ -216,7 +236,7 @@ def selected_targets():
 
 rule all:
     input:
-        selected_targets()
+        all_targets
 
 
 # --- Read preparation and contamination filtering -----------------------------
@@ -397,16 +417,32 @@ rule gfa_to_fasta:
         """
 
 
-rule assembly_manifest:
+checkpoint discover_haplotypes:
+    # Decide, after assembly, which of the mode's CANDIDATE_HAPS hifiasm actually
+    # produced (a homozygous genome or purge-off run may yield only the primary).
+    # Downstream steps fan out over the realized set via realized_haplotypes().
     input:
-        fastas=[fasta_for(hap) for hap in HAPS]
+        marker=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.hifiasm.done")
     output:
         manifest=os.path.join(ASSEMBLY_DIR, "assembly.outputs.tsv")
     run:
+        realized = []
+        for hap, suffix in HAP_GFA.items():
+            gfa = os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{suffix}.gfa")
+            if os.path.exists(gfa) and os.path.getsize(gfa) > 0:
+                realized.append((hap, gfa))
+            else:
+                print(f"discover_haplotypes: candidate '{hap}' -> {gfa} "
+                      f"absent or empty; skipping.")
+        if not realized:
+            raise ValueError(
+                f"hifiasm produced none of the expected haplotype GFAs for mode "
+                f"'{MODE}' ({', '.join(HAP_GFA.values())}). Check the assembly log."
+            )
         with open(output.manifest, "w") as out:
             out.write("haplotype\tfasta\tgfa\n")
-            for hap in HAPS:
-                out.write(f"{hap}\t{fasta_for(hap)}\t{gfa_source(hap)}\n")
+            for hap, gfa in realized:
+                out.write(f"{hap}\t{fasta_for(hap)}\t{gfa}\n")
 
 
 # --- Per-haplotype analyses ---------------------------------------------------
@@ -565,15 +601,19 @@ rule parental_triobin:
 
 rule parental_assignment_merge:
     input:
-        triobin=[os.path.join(PARENTAL_DIR, f"{hap}.triobin") for hap in HAPS],
-        fastas=[fasta_for(hap) for hap in HAPS]
+        triobin=lambda wc: [os.path.join(PARENTAL_DIR, f"{hap}.triobin")
+                            for hap in realized_haplotypes()],
+        fastas=lambda wc: [fasta_for(hap) for hap in realized_haplotypes()]
     output:
         table=os.path.join(PARENTAL_DIR, "parental_assignment.tsv")
     params:
-        triobin_args=" ".join(
-            f"-t {hap}:{os.path.join(PARENTAL_DIR, hap + '.triobin')}" for hap in HAPS
+        triobin_args=lambda wc: " ".join(
+            f"-t {hap}:{os.path.join(PARENTAL_DIR, hap + '.triobin')}"
+            for hap in realized_haplotypes()
         ),
-        fasta_args=" ".join(f"--fasta {hap}:{fasta_for(hap)}" for hap in HAPS),
+        fasta_args=lambda wc: " ".join(
+            f"--fasta {hap}:{fasta_for(hap)}" for hap in realized_haplotypes()
+        ),
         bin_arg=(f"--bin_dir {os.path.join(PARENTAL_DIR, 'binned')}" if PA_BIN else "")
     conda:
         "envs/pysam.yaml"
