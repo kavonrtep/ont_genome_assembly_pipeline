@@ -157,6 +157,24 @@ jobs:
           apptainer run -B "$PWD" "$SIF" --version
           apptainer run -B "$PWD" "$SIF" --print-config-template generic
 
+      - name: Assert all conda envs are baked into the image
+        run: |
+          # Every envs/*.yaml must already exist in the read-only image; if any
+          # is missing, snakemake would try to create it at runtime and hit a
+          # read-only filesystem (as happens for trio/annotation runs that use
+          # fastp/yak/tidk/ragtag/dotplot, which the primary-mode fixture never
+          # exercises). --conda-create-envs-only is a no-op when all are present.
+          SIF=$(ls images/genome_assembly_pipeline_*.sif | head -n1)
+          out=$(apptainer exec -B "$PWD" "$SIF" \
+            snakemake -s /opt/pipeline/Snakefile_build_envs --use-conda \
+              --conda-prefix /opt/conda/envs --conda-create-envs-only --cores 2 2>&1 || true)
+          echo "$out" | tail -30
+          if echo "$out" | grep -qiE "Creating conda environment|Read-only file system"; then
+            echo "::error::one or more conda envs are missing from the image (would be built at runtime)"
+            exit 1
+          fi
+          echo "All conda environments are present in the image."
+
       - name: Run Bioinformatics HiFi fixture
         run: |
           tests/fixtures/fetch_bioinformatics_hifi_fixture.sh

@@ -35,25 +35,15 @@ From: continuumio/miniconda3@sha256:3a2017213a16daff5bc8dec8571354249c3370d6b0d6
     conda config --show | grep channel_priority
 
     cd /opt/pipeline
-    # make dummy data so snakemake can create the environments
-    mkdir -p /opt/pipeline/data
-    # Dummy data for snakemake
-
-    touch /opt/pipeline/data/read_all_sample.fastq
-    touch /opt/pipeline/data/P.fulvum_MW160430.1_plast.fasta
-    touch /opt/pipeline/data/Pisum_fulvum_NC_059792.1_min.fasta
-    touch /opt/pipeline/data/FabTR_all_sequences_231010.db.RM_format
-    touch /opt/pipeline/data/Cameor_v2_release_2_chromosomes_only.fasta_all.NGSfilter_CamIllumina.selected.CLEAN.fasta
-    touch /opt/pipeline/data/JI1006_fulvum_v2.1.fasta.fai
-    mkdir -p /opt/pipeline/data/JI1006__2024-12-10_ver2.1
-    touch /opt/pipeline/data/JI1006__2024-12-10_ver2.1/JI1006_fulvum_v2.1.fasta.fai
-    touch /opt/pipeline/data/JI1006_v2.1_x_oligos_CAMv2r2.blast_out
-
-    # this creates the conda environments but does not run the pipeline
-    snakemake --use-conda --conda-prefix /opt/conda/envs --conda-create-envs-only --cores 4 --configfile /opt/pipeline/config.yaml
-
-    # use config/ opt/pipeline/envs/pysam.yaml to create the pysam environment
-    mamba env create -f /opt/pipeline/envs/pysam.yaml
+    # Pre-create EVERY conda environment referenced by ANY workflow so the
+    # read-only runtime image never needs to build one. Snakefile_build_envs
+    # references each envs/*.yaml directly, independent of any workflow DAG or
+    # checkpoint (Snakefile_generic's discover_haplotypes checkpoint hides its
+    # post-assembly rules from --conda-create-envs-only, so pointing it at that
+    # workflow would silently miss those envs). Envs are created at the same
+    # hashed paths the workflows resolve at runtime.
+    snakemake -s Snakefile_build_envs --use-conda --conda-prefix /opt/conda/envs \
+      --conda-create-envs-only --cores 4
 
     # Clean up
     mamba clean --all
@@ -86,6 +76,7 @@ EOF
     Snakefile /opt/pipeline/Snakefile
     Snakefile_generic /opt/pipeline/Snakefile_generic
     Snakefile_mapping /opt/pipeline/Snakefile_mapping
+    Snakefile_build_envs /opt/pipeline/Snakefile_build_envs
     config_template.yaml /opt/pipeline/config.yaml
     config_template.yaml /opt/pipeline/config_template.yaml
     config_generic_template.yaml /opt/pipeline/config_generic_template.yaml

@@ -1,0 +1,27 @@
+# Build-time only: pre-create every conda environment under envs/ so the
+# read-only Singularity image never has to create one at runtime. Referencing
+# each env file directly (no checkpoint, no per-workflow DAG) guarantees all
+# envs across all workflows are baked in. Run with:
+#   snakemake -s Snakefile_build_envs --use-conda --conda-prefix <prefix> \
+#     --conda-create-envs-only --cores 4
+import glob
+import os
+
+ENVS = sorted(
+    os.path.splitext(os.path.basename(p))[0]
+    for p in glob.glob(os.path.join(workflow.basedir, "envs", "*.yaml"))
+)
+
+
+rule all:
+    input:
+        expand(os.path.join("/tmp", "envbuild", "{env}.done"), env=ENVS)
+
+
+rule build_env:
+    output:
+        touch(os.path.join("/tmp", "envbuild", "{env}.done"))
+    conda:
+        "envs/{env}.yaml"
+    shell:
+        "true"
