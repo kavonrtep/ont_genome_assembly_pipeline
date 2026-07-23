@@ -66,16 +66,8 @@ jobs:
             exit 1
           fi
 
-      - name: Python syntax
-        run: python -m py_compile run_pipeline.py run_mapping.py version.py
-
-      - name: Generic workflow dry-run
-        run: |
-          snakemake \
-            --snakefile Snakefile_generic \
-            --configfile tests/fixtures/config_generic_ci.yaml \
-            --cores 2 \
-            --dry-run
+      - name: Validate (syntax + dry-run matrix)
+        run: bash scripts/validate.sh
 
   build-sif:
     needs: syntax
@@ -151,51 +143,12 @@ jobs:
           name: sif
           path: images/
 
-      - name: Smoke test runscript
+      - name: Container smoke test
+        # Runscript smoke + env-completeness + HiFi fixture run + output asserts,
+        # all via the shared script so CI and local checks cannot drift.
         run: |
           SIF=$(ls images/genome_assembly_pipeline_*.sif | head -n1)
-          apptainer run -B "$PWD" "$SIF" --version
-          apptainer run -B "$PWD" "$SIF" --print-config-template generic
-
-      - name: Assert all conda envs are baked into the image
-        run: |
-          # Every envs/*.yaml must already exist in the read-only image; a missing
-          # one would be created at runtime and fail on the read-only filesystem
-          # (as trio/annotation runs using fastp/yak/tidk/ragtag/dotplot did).
-          # Point HOME/XDG_CACHE_HOME at writable paths -- the runscript normally
-          # does this, so a bare `apptainer exec snakemake` otherwise dies writing
-          # its source cache to the read-only /root/.cache. Only an actual
-          # "Creating conda environment" line means an env is missing.
-          SIF=$(ls images/genome_assembly_pipeline_*.sif | head -n1)
-          mkdir -p .envcheck/cache
-          out=$(apptainer exec -B "$PWD" \
-            --env HOME="$PWD/.envcheck" --env XDG_CACHE_HOME="$PWD/.envcheck/cache" \
-            "$SIF" snakemake -s /opt/pipeline/Snakefile_build_envs --use-conda \
-              --conda-prefix /opt/conda/envs --conda-create-envs-only --cores 2 2>&1 || true)
-          echo "$out" | tail -40
-          if echo "$out" | grep -qi "Creating conda environment"; then
-            echo "::error::one or more conda envs are missing from the image (would be built at runtime)"
-            exit 1
-          fi
-          echo "All conda environments are present in the image."
-
-      - name: Run Bioinformatics HiFi fixture
-        run: |
-          tests/fixtures/fetch_bioinformatics_hifi_fixture.sh
-          SIF=$(ls images/genome_assembly_pipeline_*.sif | head -n1)
-          apptainer run -B "$PWD" "$SIF" \
-            -w generic \
-            -c tests/fixtures/config_bioinformatics_hifi.yaml \
-            -t 2
-
-      - name: Assert expected fixture outputs
-        run: |
-          # Generic workflow names per-haplotype FASTAs <prefix>.<hap>.fa and runs
-          # QUAST per haplotype; config_bioinformatics_hifi.yaml realizes only the
-          # primary haplotype.
-          test -s tests/fixtures/output_bioinformatics_hifi/assembly/assembly.primary.fa
-          test -s tests/fixtures/output_bioinformatics_hifi/assembly/assembly.outputs.tsv
-          test -f tests/fixtures/output_bioinformatics_hifi/quast/primary/quast_done.txt
+          bash scripts/container_smoke.sh "$SIF"
 
       - name: Upload fixture output on failure
         if: failure()
