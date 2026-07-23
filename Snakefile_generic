@@ -50,9 +50,11 @@ if READ_TYPE not in READ_TYPE_FLAGS:
 READ_FLAG = READ_TYPE_FLAGS[READ_TYPE]
 MAP_PRESET = "map-hifi" if READ_TYPE == "hifi" else "lr:hq"
 
-# Long reads for assembly (HiFi or ONT). Falls back to the legacy flat key.
+# Long reads for assembly (HiFi or ONT). Prefer reads.hifi_fastq for HiFi, but
+# fall back to reads.ont_fastq (older configs / CI fixture store HiFi reads there
+# with read_type: hifi) and finally to the legacy flat key.
 if READ_TYPE == "hifi":
-    READS_FASTQ = cfg("reads.hifi_fastq")
+    READS_FASTQ = cfg("reads.hifi_fastq") or cfg("reads.ont_fastq", config.get("oxford_nanopore_reads"))
 else:
     READS_FASTQ = cfg("reads.ont_fastq", config.get("oxford_nanopore_reads"))
 

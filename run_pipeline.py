@@ -96,8 +96,14 @@ def resolve_required_files(workflow_name, config_object):
     def gget(key, default=None):
         return config_get(config_object, key, default)
 
+    # Long-read input. reads.hifi_fastq is preferred for HiFi, but older configs
+    # (and the CI fixture) put HiFi reads under reads.ont_fastq with
+    # read_type: hifi, so fall back to ont_fastq when hifi_fastq is unset.
     read_type = gget("assembly.read_type", gget("hifiasm.read_type", "ont"))
-    reads_key = "reads.hifi_fastq" if read_type == "hifi" else "reads.ont_fastq"
+    if read_type == "hifi" and gget("reads.hifi_fastq"):
+        reads_key = "reads.hifi_fastq"
+    else:
+        reads_key = "reads.ont_fastq"
     required = [reads_key]
 
     if gget("contamination_filter.enabled", True) is not False:
