@@ -1,0 +1,11 @@
+name: dotplot
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # minimap2 assembly-vs-reference alignment plus a lightweight matplotlib
+  # PAF dotplot renderer (scripts/paf_dotplot.py).
+  - minimap2=2.29
+  - python=3.11
+  - matplotlib-base
+  - numpy

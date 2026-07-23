@@ -18,8 +18,8 @@ This pipeline performs genome assembly from Oxford Nanopore reads, contamination
 
 The container is built from a Singularity definition file that installs:
 - Snakemake (workflow management)
-- Hifiasm (for genome assembly)
-- Additional tools including minimap2, seqkit, BLAST, Quast, samtools, and custom Python/R scripts in the `scripts` folder
+- Hifiasm (for genome assembly; primary, Hi-C, trio and `--n-hap` phasing)
+- Additional tools including minimap2, seqkit, BLAST, Quast, samtools, TideCluster, tidk (telomeres), RagTag (reference scaffolding), yak (parental k-mers), fastp (Illumina QC), and custom Python/R scripts in the `scripts` folder
 
 
 The following key files are included inside the container:
@@ -84,7 +84,89 @@ singularity run genome_assembly_pipeline.sif --print-config-template pisum
 singularity run genome_assembly_pipeline.sif --version
 ```
 
-The generic workflow keeps plastid and mitochondrial read filtering plus read-end trimming, exposes hifiasm arguments through config, and skips read-back mapping unless `steps.map_reads_back: true`.
+See **Generic workflow: assembly modes and inputs** below for the phasing modes, required input data, and per-haplotype annotation steps the generic workflow supports.
+
+## Workflows
+
+The image ships three independent workflows, selected with `-w`:
+
+| `-w` | Snakefile | Purpose | Config template |
+|------|-----------|---------|-----------------|
+| `pisum` / `legacy` (default) | `Snakefile` | Original *Pisum*-specific full pipeline (contamination → hifiasm → painting probes → ONT mapping → TideCluster → IGV) | `config_template.yaml` |
+| `generic` | `Snakefile_generic` | Species-agnostic assembly + per-haplotype annotation (see below) | `config_generic_template.yaml` |
+| `mapping` | `Snakefile_mapping` | Map ONT + HiFi reads back to an existing assembly and run clipping / zero-coverage / TideCluster analysis | `config_mapping_template.yaml` |
+
+## Generic workflow: assembly modes and inputs
+
+The generic workflow assembles with hifiasm and then runs a set of optional
+per-haplotype annotation steps. Two things are chosen in the config: the
+**assembly mode** (how the genome is phased, and therefore which haplotypes
+exist) and which **annotation steps** to run.
+
+### Assembly modes (`assembly.mode`)
+
+| Mode | Phasing | Extra input required | hifiasm flags | Haplotypes produced |
+|------|---------|----------------------|---------------|---------------------|
+| `primary` | none (collapsed) | – | *(default)* | `primary` |
+| `phased` | hifiasm graph phasing | – | *(default)* | `primary`, `hap1`, `hap2` |
+| `hic` | Hi-C | Hi-C R1/R2 | `--h1 --h2` (`--enzyme`) | `primary`, `hap1`, `hap2` |
+| `trio` | parental k-mers (**both** parents) | paternal + maternal Illumina | `-1 -2` (yak) | `hap1`, `hap2` (parent-labelled) |
+| `triploid_hic` | Hi-C, 3 haplotypes | Hi-C R1/R2 | `--n-hap 3 --h1 --h2` | `hap1`, `hap2`, `hap3` |
+
+After assembly a `discover_haplotypes` checkpoint keeps only the haplotypes
+hifiasm actually emitted, so the annotation steps fan out over that **realized**
+set. For example a homozygous genome run in `phased` mode gracefully falls back
+to just `primary` instead of failing. Hi-C phasing separates haplotypes but
+**cannot** assign them to a parent — use `parental_assignment` (below) with
+parental Illumina for that.
+
+### Input data (config keys)
+
+| Config key | Feeds | Required when |
+|------------|-------|---------------|
+| `reads.ont_fastq` / `reads.hifi_fastq` | long reads for assembly | always (per `assembly.read_type`) |
+| `reads.hic_r1` / `reads.hic_r2` | Hi-C phasing | `mode: hic` or `triploid_hic` |
+| `assembly.trio.paternal_illumina` / `maternal_illumina` | trio binning (yak) | `mode: trio` |
+| `parental_assignment.paternal_illumina` / `maternal_illumina` | label contigs by parent | `parental_assignment.enabled` |
+| `reference.fasta` | RagTag assignment + dotplot | `reference_assignment` or `dotplot_vs_reference` enabled |
+| `contamination_filter.plastid_db` / `mitochondrial_db` | plastid/mito read filtering | `contamination_filter.enabled` |
+| `tidecluster.library` | custom tandem-repeat annotation library | optional |
+
+Paired-end Illumina is given as a comma-separated pair, e.g.
+`paternal_illumina: "pat_R1.fastq.gz,pat_R2.fastq.gz"`. All parental Illumina is
+fastp quality/adapter-trimmed before yak counting (`illumina_qc`).
+
+### Per-haplotype annotation steps
+
+Each step is toggled by its own `enabled` flag and runs once per realized haplotype.
+
+| Step | Toggle | Tool | Key output |
+|------|--------|------|-----------|
+| Contamination filter | `contamination_filter.enabled` | BLAST | filtered reads |
+| Illumina QC | `illumina_qc.enabled` | fastp | `data/qc/*.qc.fastq.gz` (+ report) |
+| Assembly QC | `quast.enabled` | Quast | `quast/{hap}/` |
+| Read-back mapping | `map_reads_back.enabled` | minimap2 | `mapping/reads_to_{hap}.sorted.bam` |
+| Tandem repeats + rDNA | `tidecluster.enabled` | TideCluster 1.17 | `analysis/tidecluster/{hap}/` (incl. `tc_rdna.tsv`) |
+| Telomeres | `telomere.enabled` | tidk | `analysis/telomere/{hap}/` |
+| Reference assignment | `reference_assignment.enabled` | RagTag | `analysis/reference_assignment/{hap}/ragtag.scaffold.*` |
+| Dotplot vs reference | `dotplot_vs_reference.enabled` | minimap2 + `paf_dotplot.py` | `analysis/dotplots/{hap}_vs_reference.png` |
+| Parental assignment | `parental_assignment.enabled` | yak triobin | `analysis/parental_assignment/parental_assignment.tsv` |
+
+Print the full annotated template with `--print-config-template generic`.
+
+### Examples
+
+```bash
+# Primary ONT assembly, telomere + reference dotplot annotation
+singularity run -B /path/to/data -B $PWD genome_assembly_pipeline.sif \
+  -w generic -c config_generic.yaml -t 20
+
+# Trio-phased HiFi assembly (parental Illumina in the config)
+#   assembly: { mode: trio, read_type: hifi,
+#               trio: { paternal_illumina: pat_R1,pat_R2, maternal_illumina: mat_R1,mat_R2 } }
+singularity run -B /path/to/data -B $PWD genome_assembly_pipeline.sif \
+  -w generic -c config_trio.yaml -t 20
+```
 
 
 ## Running on a Cluster 
@@ -153,6 +235,16 @@ The release fixture uses the PacBio HiFi training data from `kavonrtep/bioinform
 tests/fixtures/fetch_bioinformatics_hifi_fixture.sh
 singularity run -B $PWD images/genome_assembly_pipeline_v12.sif \
   -w generic -c tests/fixtures/config_bioinformatics_hifi.yaml -t 2
+```
+
+To exercise the whole generic workflow (assembly + every annotation step) on the
+*S. aureus* NCTC 8325 HiFi dataset against its real reference, prepare the
+fixture data and run `config_generic_fulltest.yaml`:
+
+```bash
+tests/fixtures/prepare_fulltest.sh   # fetches reads + reference, makes parental subsets
+singularity run -B $PWD images/genome_assembly_pipeline_v12.sif \
+  -w generic -c tests/fixtures/config_generic_fulltest.yaml -t 8
 ```
 
 

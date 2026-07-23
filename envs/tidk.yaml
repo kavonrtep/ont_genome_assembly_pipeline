@@ -1,0 +1,8 @@
+name: tidk
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # Telomere Identification toolKit. Left unpinned (like quast) to avoid
+  # brittle exact-patch pins; bump/pin once a build is validated.
+  - tidk

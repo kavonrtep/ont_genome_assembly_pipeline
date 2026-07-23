@@ -1,0 +1,51 @@
+# Full end-to-end fixture for Snakefile_generic: phased HiFi assembly of the
+# S. aureus NCTC 8325 teaching dataset with EVERY per-haplotype annotation step
+# enabled. Reference is the real GCF_000013425.1 genome. Parental reads are
+# SYNTHESIZED subsets of the HiFi reads (exercise yak/triobin mechanics only,
+# not real trio biology).
+
+reads:
+  hifi_fastq: "tests/fixtures/data/pacbio_hifi_reads25.fastq"
+
+contamination_filter:
+  enabled: false
+
+assembly:
+  # primary is correct for this homozygous bacterial fixture (with -l0 hifiasm
+  # emits bp.p_ctg + bp.a_ctg, no bp.hap1/hap2). Multi-haplotype fan-out is
+  # covered by the per-mode dry-run checks; hic/trio hap naming is stable.
+  mode: "primary"
+  read_type: "hifi"
+  base_args: "-f0"
+  extra_args: "-l0"
+
+reference:
+  fasta: "tests/fixtures/data/GCF_000013425.1_ASM1342v1_genomic.fna"
+
+quast:
+  enabled: true
+map_reads_back:
+  enabled: true
+tidecluster:
+  enabled: true
+telomere:
+  enabled: true
+  motif: "CCCTAAA"
+reference_assignment:
+  enabled: true
+dotplot_vs_reference:
+  enabled: true
+  preset: "asm20"
+
+parental_assignment:
+  enabled: true
+  method: "triobin"
+  paternal_illumina: "tests/fixtures/data/parent_pat.fastq"
+  maternal_illumina: "tests/fixtures/data/parent_mat.fastq"
+  subgenome_labels:
+    paternal: "A"
+    maternal: "B"
+  emit_binned_fastas: true
+
+outputs:
+  output_dir: "tests/fixtures/output_fulltest"

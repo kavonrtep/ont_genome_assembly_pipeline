@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
-
+hermit
+.snakemake/
 # Downloaded CI fixture data and generated fixture outputs.
 tests/fixtures/data/
 tests/fixtures/output_*/
