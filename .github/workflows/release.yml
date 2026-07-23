@@ -168,9 +168,12 @@ jobs:
 
       - name: Assert expected fixture outputs
         run: |
-          test -s tests/fixtures/output_bioinformatics_hifi/assembly/assembly.bp.p_ctg.fasta
+          # Generic workflow names per-haplotype FASTAs <prefix>.<hap>.fa and runs
+          # QUAST per haplotype; config_bioinformatics_hifi.yaml realizes only the
+          # primary haplotype.
+          test -s tests/fixtures/output_bioinformatics_hifi/assembly/assembly.primary.fa
           test -s tests/fixtures/output_bioinformatics_hifi/assembly/assembly.outputs.tsv
-          test -f tests/fixtures/output_bioinformatics_hifi/quast/quast_done.txt
+          test -f tests/fixtures/output_bioinformatics_hifi/quast/primary/quast_done.txt
 
       - name: Upload fixture output on failure
         if: failure()
