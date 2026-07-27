@@ -1,30 +1,32 @@
 #!/usr/bin/env python3
-"""Render a whole-genome dotplot from a minimap2 PAF (assembly vs reference).
+"""Whole-genome dotplot from a minimap2 PAF (assembly haplotype vs reference).
 
-The query sequences (assembly haplotype) are laid out along the X axis and the
-target sequences (reference) along the Y axis in a single concatenated
-coordinate system, with alignments drawn as line segments coloured by strand.
-Intended for the dotplot_vs_reference step of Snakefile_generic.
+Query (assembly) contigs are laid along X, ordered by the reference sequence and
+position they best match, so co-linear assemblies read as a diagonal; contigs
+with no reference hit are grouped at the right under "unplaced". Reference
+sequences are laid along Y. Both axes carry sequence-name ticks (every reference
+sequence; the largest query contigs), so the plot is legible rather than an
+anonymous concatenation. Alignments are drawn coloured by strand.
 """
 
 import argparse
 import sys
+from collections import defaultdict
 
 
 def parse_paf(path, min_len):
-    """Yield alignment records from a PAF file, filtering by block length."""
     records = []
     query_len = {}
     target_len = {}
     with open(path) as handle:
         for line in handle:
-            fields = line.rstrip("\n").split("\t")
-            if len(fields) < 12:
+            f = line.rstrip("\n").split("\t")
+            if len(f) < 12:
                 continue
-            qname, qlen, qstart, qend = fields[0], int(fields[1]), int(fields[2]), int(fields[3])
-            strand = fields[4]
-            tname, tlen, tstart, tend = fields[5], int(fields[6]), int(fields[7]), int(fields[8])
-            block = int(fields[10])
+            qname, qlen, qstart, qend = f[0], int(f[1]), int(f[2]), int(f[3])
+            strand = f[4]
+            tname, tlen, tstart, tend = f[5], int(f[6]), int(f[7]), int(f[8])
+            block = int(f[10])
             query_len[qname] = qlen
             target_len[tname] = tlen
             if block < min_len:
@@ -33,63 +35,103 @@ def parse_paf(path, min_len):
     return records, query_len, target_len
 
 
-def cumulative_offsets(lengths):
-    """Return {name: offset} and the total, ordered by descending length."""
-    offsets = {}
+def query_placement(records, query_len):
+    """For each query: (best target by aligned bases, weighted-mean target pos)."""
+    bases = defaultdict(lambda: defaultdict(int))
+    positions = defaultdict(lambda: defaultdict(list))
+    for qname, qs, qe, _strand, tname, ts, te in records:
+        w = max(qe - qs, 1)
+        bases[qname][tname] += w
+        positions[qname][tname].append(((ts + te) / 2.0, w))
+    placement = {}
+    for q in query_len:
+        if q in bases:
+            best = max(bases[q], key=bases[q].get)
+            pw = positions[q][best]
+            wsum = sum(w for _, w in pw) or 1
+            placement[q] = (best, sum(p * w for p, w in pw) / wsum)
+        else:
+            placement[q] = (None, 0.0)
+    return placement
+
+
+def offsets(order, lengths):
+    off = {}
     running = 0
-    for name, length in sorted(lengths.items(), key=lambda kv: -kv[1]):
-        offsets[name] = running
-        running += length
-    return offsets, running
+    for name in order:
+        off[name] = running
+        running += lengths[name]
+    return off, running
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("-p", "--paf", required=True, help="Input PAF file")
-    parser.add_argument("-o", "--output", required=True, help="Output PNG path")
+    parser.add_argument("-p", "--paf", required=True)
+    parser.add_argument("-o", "--output", required=True)
     parser.add_argument("--min_len", type=int, default=2000,
                         help="Minimum alignment block length to plot (default: 2000)")
-    parser.add_argument("--query_name", default="assembly", help="X axis label")
-    parser.add_argument("--target_name", default="reference", help="Y axis label")
-    parser.add_argument("--title", default=None, help="Plot title")
+    parser.add_argument("--top_n_labels", type=int, default=30,
+                        help="Label this many of the largest query contigs on X (default: 30)")
+    parser.add_argument("--query_name", default="assembly")
+    parser.add_argument("--target_name", default="reference")
+    parser.add_argument("--title", default=None)
     args = parser.parse_args()
-
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
 
     records, query_len, target_len = parse_paf(args.paf, args.min_len)
     if not records:
-        # Still emit an (empty) figure so the rule produces its declared output.
         sys.stderr.write("paf_dotplot.py: no alignments passed the length filter\n")
 
-    q_off, q_total = cumulative_offsets(query_len)
-    t_off, t_total = cumulative_offsets(target_len)
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(figsize=(10, 10))
-    for qname, qstart, qend, strand, tname, tstart, tend in records:
-        x0 = q_off[qname] + qstart
-        x1 = q_off[qname] + qend
+    # Reference axis: sequences ordered by descending length.
+    target_order = sorted(target_len, key=lambda t: -target_len[t])
+    t_rank = {t: i for i, t in enumerate(target_order)}
+    t_off, t_total = offsets(target_order, target_len)
+
+    # Query axis: ordered by (best reference, position); unplaced grouped last.
+    placement = query_placement(records, query_len)
+
+    def qkey(q):
+        t, pos = placement[q]
+        if t is None:
+            return (len(target_order), 0.0, -query_len[q])
+        return (t_rank[t], pos, 0.0)
+
+    query_order = sorted(query_len, key=qkey)
+    q_off, q_total = offsets(query_order, query_len)
+    first_unplaced = next((q_off[q] for q in query_order if placement[q][0] is None), None)
+
+    fig, ax = plt.subplots(figsize=(11, 10))
+    for qname, qs, qe, strand, tname, ts, te in records:
+        x0, x1 = q_off[qname] + qs, q_off[qname] + qe
         if strand == "+":
-            y0 = t_off[tname] + tstart
-            y1 = t_off[tname] + tend
-            colour = "#1f77b4"
+            y0, y1, colour = t_off[tname] + ts, t_off[tname] + te, "#1f77b4"
         else:
-            y0 = t_off[tname] + tend
-            y1 = t_off[tname] + tstart
-            colour = "#d62728"
+            y0, y1, colour = t_off[tname] + te, t_off[tname] + ts, "#d62728"
         ax.plot([x0, x1], [y0, y1], color=colour, linewidth=0.6)
 
-    for offset in list(q_off.values())[1:]:
-        ax.axvline(offset, color="0.85", linewidth=0.4, zorder=0)
-    for offset in list(t_off.values())[1:]:
-        ax.axhline(offset, color="0.85", linewidth=0.4, zorder=0)
+    for off in list(q_off.values())[1:]:
+        ax.axvline(off, color="0.9", linewidth=0.3, zorder=0)
+    for off in list(t_off.values())[1:]:
+        ax.axhline(off, color="0.9", linewidth=0.3, zorder=0)
+    if first_unplaced is not None:
+        ax.axvline(first_unplaced, color="0.5", linewidth=0.8, linestyle="--", zorder=1)
+
+    # Reference (Y) ticks: every sequence at its midpoint.
+    ax.set_yticks([t_off[t] + target_len[t] / 2.0 for t in target_order])
+    ax.set_yticklabels(target_order, fontsize=7)
+    # Query (X) ticks: the largest contigs only, to stay legible.
+    labelled = sorted(query_len, key=lambda q: -query_len[q])[:args.top_n_labels]
+    labelled = [q for q in query_order if q in set(labelled)]
+    ax.set_xticks([q_off[q] + query_len[q] / 2.0 for q in labelled])
+    ax.set_xticklabels(labelled, fontsize=6, rotation=90)
 
     ax.set_xlim(0, max(q_total, 1))
     ax.set_ylim(0, max(t_total, 1))
-    ax.set_xlabel(args.query_name)
+    ax.set_xlabel(f"{args.query_name}  (contigs ordered by reference; dashed = unplaced)")
     ax.set_ylabel(args.target_name)
     ax.set_title(args.title or f"{args.query_name} vs {args.target_name}")
     fig.tight_layout()

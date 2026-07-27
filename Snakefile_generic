@@ -238,13 +238,13 @@ def all_targets(wildcards):
     ]
     targets += [fasta_for(hap) for hap in haps]
     if QUAST_ENABLED:
-        targets += [os.path.join(QUAST_DIR, hap, "quast_done.txt") for hap in haps]
+        targets.append(os.path.join(QUAST_DIR, "report.tsv"))
     if MAP_ENABLED:
         targets += [os.path.join(MAPPING_DIR, f"reads_to_{hap}.sorted.bam") for hap in haps]
     if TC_ENABLED:
         targets += [os.path.join(TIDECLUSTER_DIR, hap, "tc_done.txt") for hap in haps]
     if TELO_ENABLED:
-        targets += [os.path.join(TELOMERE_DIR, hap, "telomere_done.txt") for hap in haps]
+        targets += [os.path.join(TELOMERE_DIR, hap, f"{hap}_telomere_karyoplot.png") for hap in haps]
     if REFASSIGN_ENABLED:
         targets += [os.path.join(REFASSIGN_DIR, hap, "ragtag.scaffold.fasta") for hap in haps]
     if DOTPLOT_ENABLED:
@@ -504,16 +504,25 @@ checkpoint discover_haplotypes:
 # --- Per-haplotype analyses ---------------------------------------------------
 
 rule run_quast:
+    # One comparative Quast report over all realized haplotypes (one column per
+    # haplotype), reference-based when reference.fasta is set.
     input:
-        fasta=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{{hap}}.fa")
+        fastas=lambda wc: [fasta_for(h) for h in realized_haplotypes()],
+        reference=(REFERENCE if REFERENCE else [])
     output:
-        marker=os.path.join(QUAST_DIR, "{hap}", "quast_done.txt")
+        report=os.path.join(QUAST_DIR, "report.tsv")
+    params:
+        labels=lambda wc: ",".join(realized_haplotypes()),
+        ref_arg=(f"-r {REFERENCE}" if REFERENCE else "")
     conda:
         "envs/quast.yaml"
+    threads: workflow.cores
+    log:
+        os.path.join(LOG_DIR, "quast.log")
     shell:
         """
-        quast {input.fasta} -o {QUAST_DIR}/{wildcards.hap}
-        touch {output.marker}
+        quast {input.fastas} -l "{params.labels}" {params.ref_arg} \
+          -o {QUAST_DIR} -t {threads} > {log} 2>&1
         """
 
 
@@ -569,24 +578,50 @@ rule run_tidecluster:
         """
 
 
-rule find_telomeres:
+rule telomere_search:
     input:
         fasta=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{{hap}}.fa")
     output:
-        marker=os.path.join(TELOMERE_DIR, "{hap}", "telomere_done.txt")
+        tsv=os.path.join(TELOMERE_DIR, "{hap}", "{hap}_telomeric_repeat_windows.tsv")
     params:
         outdir=os.path.join(TELOMERE_DIR, "{hap}")
     conda:
         "envs/tidk.yaml"
     log:
-        os.path.join(LOG_DIR, "telomere_{hap}.log")
+        os.path.join(LOG_DIR, "telomere_search_{hap}.log")
     shell:
         """
         tidk search --string {TELO_MOTIF} --output {wildcards.hap} \
           --dir {params.outdir} {input.fasta} > {log} 2>&1
-        tidk plot --tsv {params.outdir}/{wildcards.hap}_telomeric_repeat_windows.tsv \
-          --output {params.outdir}/{wildcards.hap}_telomere >> {log} 2>&1 || true
-        touch {output.marker}
+        """
+
+
+def telomere_agp_input(wildcards):
+    # Reorient the karyoplot to reference orientation when reference_assignment ran.
+    if REFASSIGN_ENABLED:
+        return os.path.join(REFASSIGN_DIR, wildcards.hap, "ragtag.scaffold.agp")
+    return []
+
+
+rule telomere_karyoplot:
+    input:
+        tsv=os.path.join(TELOMERE_DIR, "{hap}", "{hap}_telomeric_repeat_windows.tsv"),
+        fai=os.path.join(ASSEMBLY_DIR, f"{PREFIX}.{{hap}}.fa.fai"),
+        agp=telomere_agp_input
+    output:
+        png=os.path.join(TELOMERE_DIR, "{hap}", "{hap}_telomere_karyoplot.png")
+    params:
+        agp_arg=lambda wc, input: f"--agp {input.agp}" if input.agp else ""
+    conda:
+        "envs/dotplot.yaml"
+    log:
+        os.path.join(LOG_DIR, "telomere_karyoplot_{hap}.log")
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        telomere_karyoplot.py --tsv {input.tsv} --fai {input.fai} {params.agp_arg} \
+          --motif {TELO_MOTIF} -o {output.png} > {log} 2>&1
         """
 
 
@@ -661,7 +696,8 @@ rule parental_assignment_merge:
                             for hap in realized_haplotypes()],
         fastas=lambda wc: [fasta_for(hap) for hap in realized_haplotypes()]
     output:
-        table=os.path.join(PARENTAL_DIR, "parental_assignment.tsv")
+        table=os.path.join(PARENTAL_DIR, "parental_assignment.tsv"),
+        summary=os.path.join(PARENTAL_DIR, "parental_assignment.summary.tsv")
     params:
         triobin_args=lambda wc: " ".join(
             f"-t {hap}:{os.path.join(PARENTAL_DIR, hap + '.triobin')}"
@@ -679,5 +715,5 @@ rule parental_assignment_merge:
         """
         parental_assignment.py {params.triobin_args} {params.fasta_args} \
           --paternal_label {PA_LAB_PAT} --maternal_label {PA_LAB_MAT} \
-          {params.bin_arg} -o {output.table} > {log} 2>&1
+          {params.bin_arg} --summary {output.summary} -o {output.table} > {log} 2>&1
         """

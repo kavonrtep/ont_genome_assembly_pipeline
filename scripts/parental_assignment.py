@@ -74,6 +74,9 @@ def main():
                              "with --bin_dir to write per-subgenome FASTAs. Repeatable.")
     parser.add_argument("--bin_dir", default=None,
                         help="If set, write {bin_dir}/{hap}.{subgenome}.fa binned by call.")
+    parser.add_argument("--summary", default=None,
+                        help="If set, write a per-haplotype + overall assignment summary TSV "
+                             "(bp and length-weighted %% per category). Needs --fasta.")
     args = parser.parse_args()
 
     label_map = {
@@ -104,25 +107,63 @@ def main():
         for hap, contig, parent, subgenome in rows:
             out.write(f"{hap}\t{contig}\t{parent}\t{subgenome}\n")
 
+    # contig -> subgenome, per haplotype (used by both binning and summary).
+    # Contigs present in a FASTA but absent from the triobin output are
+    # "unassigned" (distinct from triobin's own "ambiguous" call).
+    assignment = {}
+    for hap, contig, _parent, subgenome in rows:
+        assignment.setdefault(hap, {})[contig] = subgenome
+
+    fasta_by_hap = {}
+    if args.bin_dir or args.summary:
+        for spec in args.fasta:
+            hap, path = spec.split(":", 1)
+            fasta_by_hap[hap] = read_fasta(path)
+
     if args.bin_dir:
         import os
 
         os.makedirs(args.bin_dir, exist_ok=True)
-        fasta_by_hap = {}
-        for spec in args.fasta:
-            hap, path = spec.split(":", 1)
-            fasta_by_hap[hap] = read_fasta(path)
-        # contig -> subgenome, per haplotype
-        assignment = {}
-        for hap, contig, _parent, subgenome in rows:
-            assignment.setdefault(hap, {})[contig] = subgenome
         for hap, seqs in fasta_by_hap.items():
             bins = {}
             for contig, seq in seqs.items():
-                subgenome = assignment.get(hap, {}).get(contig, "ambiguous")
+                subgenome = assignment.get(hap, {}).get(contig, "unassigned")
                 bins.setdefault(subgenome, []).append((contig, seq))
             for subgenome, records in bins.items():
                 write_fasta(os.path.join(args.bin_dir, f"{hap}.{subgenome}.fa"), records)
+
+    if args.summary:
+        categories = [args.paternal_label, args.maternal_label, "ambiguous", "unassigned"]
+
+        def blank():
+            return {c: [0, 0] for c in categories}  # category -> [n_contigs, bp]
+
+        per_hap = {}
+        overall = blank()
+        for hap, seqs in fasta_by_hap.items():
+            stats = per_hap.setdefault(hap, blank())
+            for contig, seq in seqs.items():
+                cat = assignment.get(hap, {}).get(contig, "unassigned")
+                if cat not in stats:
+                    cat = "ambiguous"
+                stats[cat][0] += 1
+                stats[cat][1] += len(seq)
+                overall[cat][0] += 1
+                overall[cat][1] += len(seq)
+
+        def emit(out, hap_label, stats):
+            tot_n = sum(v[0] for v in stats.values()) or 1
+            tot_bp = sum(v[1] for v in stats.values()) or 1
+            for cat in categories:
+                n, bp = stats[cat]
+                out.write(f"{hap_label}\t{cat}\t{n}\t{bp}\t"
+                          f"{100.0 * n / tot_n:.2f}\t{100.0 * bp / tot_bp:.2f}\n")
+
+        with open(args.summary, "w") as out:
+            out.write("haplotype\tcategory\tn_contigs\tbp\tpct_contigs\tpct_bp\n")
+            for hap in sorted(per_hap):
+                emit(out, hap, per_hap[hap])
+            emit(out, "ALL", overall)
 
 
 if __name__ == "__main__":
