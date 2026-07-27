@@ -43,6 +43,6 @@ echo; echo "== assert expected fixture outputs =="
 O=tests/fixtures/output_bioinformatics_hifi
 test -s "$O/assembly/assembly.primary.fa"        && echo "  ok: assembly.primary.fa"
 test -s "$O/assembly/assembly.outputs.tsv"       && echo "  ok: assembly.outputs.tsv"
-test -f "$O/quast/primary/quast_done.txt"        && echo "  ok: quast/primary/quast_done.txt"
+test -s "$O/quast/report.tsv"                    && echo "  ok: quast/report.tsv"
 
 echo; echo "CONTAINER-SMOKE: OK"
