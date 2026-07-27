@@ -56,6 +56,7 @@ emit_cfg() {  # emit_cfg(mode) -> path
     echo "  mode: \"$mode\""
     echo "  read_type: \"ont\""
     echo "  trio: { paternal_illumina: \"$tmp/in/pat.fq\", maternal_illumina: \"$tmp/in/mat.fq\" }"
+    echo "switch_analysis: { enabled: true }"
     echo "outputs: { output_dir: \"$tmp/out_$mode\" }"
   } > "$cfg"
   echo "$cfg"

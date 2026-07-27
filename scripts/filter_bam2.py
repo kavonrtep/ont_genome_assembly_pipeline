@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import os
 
-def passes_filters(aln, max_mismatch_prop, min_mapq, min_aln_length):
+def passes_filters(aln, max_mismatch_prop, min_mapq, min_aln_length, min_aln_frac=None):
     """
     Return True if the alignment passes filtering criteria.
     """
@@ -21,6 +21,12 @@ def passes_filters(aln, max_mismatch_prop, min_mapq, min_aln_length):
 
     if min_aln_length is not None and aln_length < min_aln_length:
         return False
+
+    if min_aln_frac is not None:
+        # End-to-end filter: aligned portion / full read length (incl. clips).
+        read_length = aln.infer_read_length()
+        if not read_length or aln_length / float(read_length) < min_aln_frac:
+            return False
 
     if min_mapq is not None and aln.mapping_quality < min_mapq:
         return False
@@ -80,11 +86,17 @@ def main():
     parser.add_argument("--min_mapq", type=int, default=None, help="Minimum MAPQ value")
     parser.add_argument("--min_aln_length", type=int, default=None,
                         help="Minimum alignment length (query alignment length)")
+    parser.add_argument("--min_aln_frac", type=float, default=None,
+                        help="Minimum aligned fraction of the read (query alignment length / read "
+                             "length). End-to-end filter, e.g. 0.90 keeps reads aligned over >=90%% "
+                             "of their length (minimal clipping).")
     parser.add_argument("--threads", type=int, default=1, help="Number of threads to use for samtools sort")
     args = parser.parse_args()
 
-    if args.max_mismatch_prop is None and args.min_mapq is None and args.min_aln_length is None:
-        parser.error("At least one filtering parameter (--max_mismatch_prop, --min_mapq, --min_aln_length) must be set.")
+    if (args.max_mismatch_prop is None and args.min_mapq is None
+            and args.min_aln_length is None and args.min_aln_frac is None):
+        parser.error("At least one filtering parameter (--max_mismatch_prop, --min_mapq, "
+                     "--min_aln_length, --min_aln_frac) must be set.")
 
     # Create a temporary directory for intermediate files
     temp_dir = tempfile.mkdtemp(prefix="temp_bam_sort_")
@@ -101,7 +113,7 @@ def main():
 
     for read_name, group in itertools.groupby(bam_in.fetch(until_eof=True), key=lambda aln: aln.query_name):
         group_list = list(group)
-        passing = [aln for aln in group_list if passes_filters(aln, args.max_mismatch_prop, args.min_mapq, args.min_aln_length)]
+        passing = [aln for aln in group_list if passes_filters(aln, args.max_mismatch_prop, args.min_mapq, args.min_aln_length, args.min_aln_frac)]
         if not passing:
             continue
         updated = update_read_group(passing)

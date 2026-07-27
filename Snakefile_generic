@@ -34,6 +34,7 @@ TELOMERE_DIR = os.path.join(ANALYSIS_DIR, "telomere")
 REFASSIGN_DIR = os.path.join(ANALYSIS_DIR, "reference_assignment")
 DOTPLOT_DIR = os.path.join(ANALYSIS_DIR, "dotplots")
 PARENTAL_DIR = os.path.join(ANALYSIS_DIR, "parental_assignment")
+SWITCH_DIR = os.path.join(ANALYSIS_DIR, "switch")
 YAK_DIR = os.path.join(DATA_DIR, "yak")
 QC_DIR = os.path.join(DATA_DIR, "qc")
 
@@ -104,6 +105,9 @@ PA_BIN = bool(cfg("parental_assignment.emit_binned_fastas", False))
 # --- Optional per-haplotype annotation steps ----------------------------------
 QUAST_ENABLED = bool(cfg("quast.enabled", cfg("steps.quast", True)))
 MAP_ENABLED = bool(cfg("map_reads_back.enabled", cfg("steps.map_reads_back", False)))
+SWITCH_ENABLED = bool(cfg("switch_analysis.enabled", False))
+SWITCH_MIN_ALN_FRAC = cfg("switch_analysis.min_aln_frac", 0.90)
+SWITCH_MIN_CLIP = cfg("switch_analysis.min_clip", 500)
 TC_ENABLED = bool(cfg("tidecluster.enabled", False))
 TC_LIBRARY = cfg("tidecluster.library", "")
 # rDNA detection is on by default in TideCluster run_all; expose its thresholds
@@ -202,7 +206,7 @@ def gfa_source(hap):
 ALL_DIRS = [
     OUTPUT_DIR, DATA_DIR, ASSEMBLY_DIR, QUAST_DIR, LOG_DIR, MAPPING_DIR,
     ANALYSIS_DIR, TIDECLUSTER_DIR, TELOMERE_DIR, REFASSIGN_DIR, DOTPLOT_DIR,
-    PARENTAL_DIR, YAK_DIR, QC_DIR,
+    PARENTAL_DIR, SWITCH_DIR, YAK_DIR, QC_DIR,
 ]
 for path in ALL_DIRS:
     os.makedirs(path, exist_ok=True)
@@ -229,6 +233,11 @@ def realized_haplotypes():
     return haps
 
 
+def switch_haplotypes():
+    """Realized haplotypes to run switch analysis on (the phased ones, not primary)."""
+    return [h for h in realized_haplotypes() if h != "primary"]
+
+
 def all_targets(wildcards):
     haps = realized_haplotypes()
     targets = [
@@ -241,6 +250,10 @@ def all_targets(wildcards):
         targets.append(os.path.join(QUAST_DIR, "report.tsv"))
     if MAP_ENABLED:
         targets += [os.path.join(MAPPING_DIR, f"reads_to_{hap}.sorted.bam") for hap in haps]
+    if SWITCH_ENABLED:
+        for hap in switch_haplotypes():
+            targets.append(os.path.join(SWITCH_DIR, hap, f"reads_to_{hap}.e2e.bam"))
+            targets.append(os.path.join(SWITCH_DIR, hap, f"{hap}_switch_clip_info.tsv"))
     if TC_ENABLED:
         targets += [os.path.join(TIDECLUSTER_DIR, hap, "tc_done.txt") for hap in haps]
     if TELO_ENABLED:
@@ -543,6 +556,54 @@ rule map_reads_back:
         minimap2 -a -x {MAP_PRESET} -t {threads} {input.fasta} {input.fastq} 2> {log} | \
           samtools sort -@ {threads} -o {output.bam} -
         samtools index -c {output.bam}
+        """
+
+
+rule filter_endtoend:
+    # Keep only reads aligned end-to-end (>= min_aln_frac of read length) to this
+    # haplotype, so haplotype-switch points read as coverage gaps in IGV.
+    input:
+        bam=os.path.join(MAPPING_DIR, "reads_to_{hap}.sorted.bam"),
+        csi=os.path.join(MAPPING_DIR, "reads_to_{hap}.sorted.bam.csi")
+    output:
+        bam=os.path.join(SWITCH_DIR, "{hap}", "reads_to_{hap}.e2e.bam"),
+        csi=os.path.join(SWITCH_DIR, "{hap}", "reads_to_{hap}.e2e.bam.csi")
+    conda:
+        "envs/pysam.yaml"
+    threads: workflow.cores
+    log:
+        os.path.join(LOG_DIR, "filter_endtoend_{hap}.log")
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        filter_bam2.py --bam {input.bam} --out {output.bam} \
+          --min_aln_frac {SWITCH_MIN_ALN_FRAC} --threads {threads} > {log} 2>&1
+        samtools index -c {output.bam}
+        """
+
+
+rule switch_junctions:
+    # Clip pile-ups on the (unfiltered) mapping mark chimeric-contig junctions:
+    # reads that switch haplotype clip at the boundary. detect_clipping reports
+    # their positions (<hap>_switch_clip_info.tsv).
+    input:
+        bam=os.path.join(MAPPING_DIR, "reads_to_{hap}.sorted.bam"),
+        csi=os.path.join(MAPPING_DIR, "reads_to_{hap}.sorted.bam.csi")
+    output:
+        clip=os.path.join(SWITCH_DIR, "{hap}", "{hap}_switch_clip_info.tsv")
+    params:
+        prefix=os.path.join(SWITCH_DIR, "{hap}", "{hap}_switch")
+    conda:
+        "envs/pysam.yaml"
+    log:
+        os.path.join(LOG_DIR, "switch_junctions_{hap}.log")
+    shell:
+        """
+        scripts_dir=$(realpath scripts)
+        export PATH=$scripts_dir:$PATH
+        detect_clipping.py --bam {input.bam} --min_clip {SWITCH_MIN_CLIP} \
+          --add_coverage --out {params.prefix} > {log} 2>&1
         """
 
 

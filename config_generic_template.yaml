@@ -88,6 +88,14 @@ quast:
   enabled: true
 map_reads_back:
   enabled: false
+# Haplotype switch analysis (phased / hic / trio only): map all long reads to
+# each haplotype, keep only end-to-end alignments (switch points then show as
+# coverage gaps), and flag clip-pile-up junctions in chimeric contigs. Runs on
+# hap1/hap2(/hap3), not the primary.
+switch_analysis:
+  enabled: false
+  min_aln_frac: 0.90     # keep reads aligned over >= this fraction of read length
+  min_clip: 500          # min soft-clip length for a candidate switch junction
 tidecluster:
   enabled: false
   # Optional custom tandem-repeat annotation library (TideCluster -l). Leave
