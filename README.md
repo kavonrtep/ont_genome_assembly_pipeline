@@ -138,19 +138,22 @@ fastp quality/adapter-trimmed before yak counting (`illumina_qc`).
 
 ### Per-haplotype annotation steps
 
-Each step is toggled by its own `enabled` flag and runs once per realized haplotype.
+Each step is toggled by its own `enabled` flag; unless noted it runs once per realized haplotype.
 
 | Step | Toggle | Tool | Key output |
 |------|--------|------|-----------|
 | Contamination filter | `contamination_filter.enabled` | BLAST | filtered reads |
 | Illumina QC | `illumina_qc.enabled` | fastp | `data/qc/*.qc.fastq.gz` (+ report) |
-| Assembly QC | `quast.enabled` | Quast | `quast/{hap}/` |
+| Assembly QC | `quast.enabled` | Quast | **one comparative** `quast/report.{tsv,html}` (all haplotypes as columns, reference-based when `reference.fasta` set) |
 | Read-back mapping | `map_reads_back.enabled` | minimap2 | `mapping/reads_to_{hap}.sorted.bam` |
 | Tandem repeats + rDNA | `tidecluster.enabled` | TideCluster 1.17 | `analysis/tidecluster/{hap}/` (incl. `tc_rdna.tsv`) |
-| Telomeres | `telomere.enabled` | tidk | `analysis/telomere/{hap}/` |
+| Telomeres | `telomere.enabled` | tidk + karyoplot | `analysis/telomere/{hap}/{hap}_telomere_karyoplot.png` (terminal-telomere ideogram, reoriented to reference) |
 | Reference assignment | `reference_assignment.enabled` | RagTag | `analysis/reference_assignment/{hap}/ragtag.scaffold.*` |
-| Dotplot vs reference | `dotplot_vs_reference.enabled` | minimap2 + `paf_dotplot.py` | `analysis/dotplots/{hap}_vs_reference.png` |
-| Parental assignment | `parental_assignment.enabled` | yak triobin | `analysis/parental_assignment/parental_assignment.tsv` |
+| Dotplot vs reference | `dotplot_vs_reference.enabled` | minimap2 + `paf_dotplot.py` | `analysis/dotplots/{hap}_vs_reference.png` (reference-ordered, name-labelled axes) |
+| Parental assignment | `parental_assignment.enabled` | yak triobin | `analysis/parental_assignment/parental_assignment.{tsv,summary.tsv}` |
+| Haplotype switch analysis | `switch_analysis.enabled` | minimap2 + `filter_bam2.py` / `detect_clipping.py` | `analysis/switch/{hap}/reads_to_{hap}.e2e.bam` + `{hap}_switch_clip_info.tsv` (hap1/hap2 only) |
+
+The switch analysis maps all long reads to each haplotype, keeps only end-to-end alignments (so haplotype-switch points in chimeric contigs show as coverage gaps in IGV), and flags clip pile-ups at the junctions.
 
 Print the full annotated template with `--print-config-template generic`.
 
